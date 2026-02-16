@@ -317,7 +317,8 @@ func take_damage(amount: int, _poise_damage: int = 0, source: Node = null) -> vo
 	if current_state == State.PARRY and parry_active_timer > 0:
 		emit_signal("debug_log", "PARRY SUCCESS!")
 		if source and source.has_method("take_damage") and source.is_in_group("enemies"):
-			var kb := (source.global_position - global_position).normalized()
+			var src2d: Node2D = source as Node2D
+			var kb: Vector2 = (src2d.global_position - global_position).normalized()
 			source.take_damage(0, 45, kb)
 		_change_state(State.IDLE)
 	elif current_state == State.GUARD:

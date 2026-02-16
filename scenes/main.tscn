@@ -9,6 +9,25 @@ script = ExtResource("1")
 
 [node name="Player" parent="." instance=ExtResource("2")]
 position = Vector2(360, 640)
+max_hp = null
+max_stamina = null
+stamina_regen = null
+stamina_delay = null
+move_speed = null
+iframes_duration = null
+roll_stamina = null
+roll_iframes = null
+roll_recovery = null
+roll_distance = null
+parry_stamina = null
+parry_window = null
+parry_fail_stagger = null
+estus_stamina = null
+estus_heal = null
+estus_max_charges = null
+guard_reduction = null
+guard_stamina_per_hit = null
+guard_break_stagger = null
 
 [node name="Camera2D" type="Camera2D" parent="Player"]
 
