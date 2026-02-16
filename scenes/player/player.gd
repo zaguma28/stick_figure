@@ -362,15 +362,16 @@ func _check_attack_hits() -> void:
 		_:
 			return
 
-	for enemy in get_tree().get_nodes_in_group("enemies"):
-		if enemy.get_instance_id() in attack_hit_ids:
+	for node in get_tree().get_nodes_in_group("enemies"):
+		var enemy: Node2D = node as Node2D
+		if not enemy or enemy.get_instance_id() in attack_hit_ids:
 			continue
-		var dist := global_position.distance_to(enemy.global_position)
+		var dist: float = global_position.distance_to(enemy.global_position)
 		if dist > atk_range:
 			continue
-		var to_enemy := (enemy.global_position - global_position).normalized()
+		var to_enemy: Vector2 = (enemy.global_position - global_position).normalized()
 		if current_state != State.SKILL_2:  # 円斬りは全方位
-			var angle := absf(facing_dir.angle_to(to_enemy))
+			var angle: float = absf(facing_dir.angle_to(to_enemy))
 			if angle > atk_arc:
 				continue
 		attack_hit_ids.append(enemy.get_instance_id())
