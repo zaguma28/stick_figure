@@ -42,10 +42,10 @@ func _on_debug_log(msg: String) -> void:
 	debug_label.text = "\n".join(debug_lines)
 
 func _process(_delta: float) -> void:
-	# プレイヤーの現在ステートを表示
+	# プレイヤーの現在ステートと座標を表示
 	var player := get_tree().get_first_node_in_group("player")
 	if player and player.has_method("_is_locked"):
 		var state_names := ["IDLE","MOVE","ATK1","ATK2","ATK3","ROLL","GUARD","PARRY","P_FAIL","ESTUS","STAGGER","SK1","SK2"]
 		var idx: int = player.current_state
 		if idx >= 0 and idx < state_names.size():
-			state_label.text = "State: %s" % state_names[idx]
+			state_label.text = "State: %s | Pos: (%.0f, %.0f)" % [state_names[idx], player.position.x, player.position.y]

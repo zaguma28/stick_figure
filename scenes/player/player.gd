@@ -174,7 +174,7 @@ func _handle_input() -> void:
 			_change_state(State.IDLE)
 
 # === ステート処理 ===
-func _process_state(delta: float) -> void:
+func _process_state(_delta: float) -> void:
 	match current_state:
 		State.IDLE:
 			velocity = Vector2.ZERO
@@ -346,6 +346,8 @@ func _consume_stamina(cost: float) -> void:
 	emit_signal("stamina_changed", stamina, max_stamina)
 
 func _change_state(new_state: State) -> void:
+	if new_state == State.MOVE and current_state != State.MOVE:
+		emit_signal("debug_log", "MOVE (dir: %.1f, %.1f)" % [move_dir.x, move_dir.y])
 	current_state = new_state
 
 func _is_locked() -> bool:
