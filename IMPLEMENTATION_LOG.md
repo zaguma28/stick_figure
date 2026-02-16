@@ -19,9 +19,9 @@
 - [x] Sprint 1.1 Godotプロジェクト作成
 - [x] Sprint 1.2 入力＆UI
 - [x] Sprint 1.3 プレイヤー基礎
-- [ ] Sprint 2.1 ヒット判定
-- [ ] Sprint 2.2 敵AI 6種
-- [ ] Sprint 2.3 体幹
+- [x] Sprint 2.1 ヒット判定
+- [x] Sprint 2.2 敵AI 6種
+- [x] Sprint 2.3 体幹
 - [ ] Sprint 3.1 フロア進行
 - [ ] Sprint 3.2 報酬3択
 - [ ] Sprint 3.3 詰み防止
@@ -32,35 +32,43 @@
 
 ## 決定ログ
 
-### 2026-02-16（Sprint 1完了）
+### 2026-02-16（Sprint 1）
 
-- Decision: tscnのハードコードuid（uid://main_scene等）を削除
-- Rationale: Godot 4.xが自動生成するUID形式に準拠しない値だったため、エディタ読み込みエラー回避
-- Notes: Godotが初回ロード時にuid行を自動付与する
+- UID削除、コンボリファクタ、キーマップ追加
 
-- Decision: player.gdの\_try_attack()コンボロジックをリファクタ
-- Rationale: stage変数が複数回上書きされる冗長なコードを、\_last_attackベースのシンプルな分岐に整理
-- Notes: コンボ窓0.3秒、3段目で窓なし（リセット）
+### 2026-02-16（Sprint 2）
 
-- Decision: HUDにキーマップ表示を追加
-- Rationale: 初見で操作方法がわからないため画面下部にガイド表示
+- Decision: 攻撃ヒット判定をArea2Dではなく距離ベースで実装
+- Rationale: tscn構造をシンプルに保ち、コード側で制御する方が柔軟
+- Notes: 攻撃範囲+角度で扇状判定、円斬りは全方位
+
+- Decision: 敵をbase_enemy.tscn + set_script()で生成
+- Rationale: 1つのtscnで6種をカバー、tscn管理コストを最小化
+
+- Decision: ヒットストップをEngine.time_scaleで実装
+- Rationale: グローバルな一時停止で全オブジェクトに影響、シンプル
+- Notes: ignore_time_scale=trueのタイマーで0.06秒後に復帰
+
+- Decision: パリィ成功時の体幹ダメージをtake_damage内で処理
+- Rationale: source引数で攻撃元を追跡、パリィ成功時にsource.take_damage(0, 45, kb)を呼ぶ
 
 ---
 
-## 実行コマンドログ
+## コリジョンレイヤー設計
 
-### 2026-02-16
-
-- Command: git init
-- Result: リポジトリ初期化完了
-
-- Command: git add -A && git commit -m "Sprint 1.1-1.3: player, UI, input system"
-- Result: （実行待ち）
+| Layer | 用途           | 値  |
+| ----- | -------------- | --- |
+| 1     | 壁・地形       | 1   |
+| 2     | プレイヤー     | 2   |
+| 3     | 敵本体         | 4   |
+| 4     | プレイヤー攻撃 | 8   |
+| 5     | 敵弾           | 16  |
 
 ---
 
 ## 既知のバグ / TODO
 
-- TODO: virtual_joystickはモバイル向けだがPC操作（WASD）との統合が未完了。現在はキーボード入力のみ有効
-- TODO: パリィ成功時の外部連携（敵体幹ダメージ通知）はSprint 2で実装
-- TODO: HP/スタミナバーの色分け（低HPで赤等）は演出フェーズで追加
+- TODO: 敵同士の衝突回避（現在は重なる）
+- TODO: 敵死亡時のSE/エフェクト
+- TODO: フロアスケーリング（HP/ダメ係数）未実装
+- TODO: virtual_joystickとキーボード入力の統合

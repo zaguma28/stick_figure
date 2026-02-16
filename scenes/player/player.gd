@@ -61,6 +61,9 @@ var combo_window_timer: float = 0.0
 var skill1_cd: float = 0.0   # 直線突き CT6s
 var skill2_cd: float = 0.0   # 円斬り   CT9s
 
+# 攻撃ヒット追跡
+var attack_hit_ids: Array = []
+
 # デバッグ用シグナル
 signal debug_log(msg: String)
 signal hp_changed(current: int, maximum: int)
@@ -79,6 +82,7 @@ func _physics_process(delta: float) -> void:
 	_update_timers(delta)
 	_handle_input()
 	_process_state(delta)
+	_check_attack_hits()
 	move_and_slide()
 	_update_visuals()
 
@@ -306,26 +310,27 @@ func _enter_skill2() -> void:
 	emit_signal("debug_log", "SKILL2: 円斬り (dmg:24 CT:9s)")
 
 # === ダメージ受付 ===
-func take_damage(amount: int, _poise_damage: int = 0) -> void:
+func take_damage(amount: int, _poise_damage: int = 0, source: Node = null) -> void:
 	if iframes_timer > 0:
 		return
 
-	if current_state == State.GUARD:
+	if current_state == State.PARRY and parry_active_timer > 0:
+		emit_signal("debug_log", "PARRY SUCCESS!")
+		if source and source.has_method("take_damage") and source.is_in_group("enemies"):
+			var kb := (source.global_position - global_position).normalized()
+			source.take_damage(0, 45, kb)
+		_change_state(State.IDLE)
+	elif current_state == State.GUARD:
 		var reduced := int(amount * (1.0 - guard_reduction))
 		hp -= reduced
-		var stm_cost := guard_stamina_per_hit
-		stamina -= stm_cost
+		stamina -= guard_stamina_per_hit
 		stamina_delay_timer = stamina_delay
-		emit_signal("debug_log", "GUARD HIT -%d HP (軽減)" % reduced)
+		emit_signal("debug_log", "GUARD HIT -%d HP" % reduced)
 		if stamina <= 0:
 			stamina = 0
 			_change_state(State.STAGGER)
 			state_timer = guard_break_stagger
 			emit_signal("debug_log", "GUARD BREAK!")
-	elif current_state == State.PARRY and parry_active_timer > 0:
-		emit_signal("debug_log", "PARRY SUCCESS!")
-		# パリィ成功: 相手に体幹ダメージ（外部で処理）
-		_change_state(State.IDLE)
 	else:
 		hp -= amount
 		iframes_timer = iframes_duration
@@ -334,6 +339,51 @@ func take_damage(amount: int, _poise_damage: int = 0) -> void:
 	hp = maxi(hp, 0)
 	emit_signal("hp_changed", hp, max_hp)
 	emit_signal("stamina_changed", stamina, max_stamina)
+
+# === 攻撃ヒット判定（距離ベース）===
+func _check_attack_hits() -> void:
+	var atk_range := 0.0
+	var atk_arc := 0.0
+	var dmg := 0
+	var poise_dmg := 0
+
+	match current_state:
+		State.ATTACK_1:
+			atk_range = 44.0; atk_arc = PI * 0.6; dmg = attack_damage[0]; poise_dmg = attack_poise[0]
+		State.ATTACK_2:
+			atk_range = 44.0; atk_arc = PI * 0.6; dmg = attack_damage[1]; poise_dmg = attack_poise[1]
+		State.ATTACK_3:
+			atk_range = 50.0; atk_arc = PI * 0.7; dmg = attack_damage[2]; poise_dmg = attack_poise[2]
+		State.SKILL_1:
+			atk_range = 60.0; atk_arc = PI * 0.3; dmg = 42; poise_dmg = 18
+		State.SKILL_2:
+			atk_range = 50.0; atk_arc = PI; dmg = 24; poise_dmg = 12
+		_:
+			return
+
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		if enemy.get_instance_id() in attack_hit_ids:
+			continue
+		var dist := global_position.distance_to(enemy.global_position)
+		if dist > atk_range:
+			continue
+		var to_enemy := (enemy.global_position - global_position).normalized()
+		if current_state != State.SKILL_2:  # 円斬りは全方位
+			var angle := absf(facing_dir.angle_to(to_enemy))
+			if angle > atk_arc:
+				continue
+		attack_hit_ids.append(enemy.get_instance_id())
+		enemy.take_damage(dmg, poise_dmg, to_enemy)
+		_trigger_hitstop()
+		emit_signal("debug_log", "HIT enemy -%d HP" % dmg)
+
+# === ヒットストップ ===
+func _trigger_hitstop() -> void:
+	Engine.time_scale = 0.05
+	get_tree().create_timer(0.06, true, false, true).timeout.connect(_end_hitstop)
+
+func _end_hitstop() -> void:
+	Engine.time_scale = 1.0
 
 # === ユーティリティ ===
 func _can_use_stamina(cost: float) -> bool:
@@ -346,8 +396,9 @@ func _consume_stamina(cost: float) -> void:
 	emit_signal("stamina_changed", stamina, max_stamina)
 
 func _change_state(new_state: State) -> void:
-	if new_state == State.MOVE and current_state != State.MOVE:
-		emit_signal("debug_log", "MOVE (dir: %.1f, %.1f)" % [move_dir.x, move_dir.y])
+	# 攻撃開始時にヒットリストをクリア
+	if new_state in [State.ATTACK_1, State.ATTACK_2, State.ATTACK_3, State.SKILL_1, State.SKILL_2]:
+		attack_hit_ids.clear()
 	current_state = new_state
 
 func _is_locked() -> bool:
