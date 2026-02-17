@@ -431,7 +431,7 @@ func _draw_floor_hazards() -> void:
 		var safe_center_local := float(hazard.get("safe_center_x", global_position.x)) - global_position.x
 		var safe_half := float(hazard.get("safe_half_width", 120.0))
 		var visual_h := float(hazard.get("visual_height", 180.0))
-		var color := hazard.get("color", Color(1.0, 0.2, 0.2, 0.24))
+		var color: Color = Color(hazard.get("color", Color(1.0, 0.2, 0.2, 0.24)))
 		var field_half := 520.0
 		var left_w := maxf(0.0, safe_center_local - safe_half + field_half)
 		var right_x := safe_center_local + safe_half

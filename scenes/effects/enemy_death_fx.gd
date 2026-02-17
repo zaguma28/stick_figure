@@ -7,6 +7,7 @@ var elapsed: float = 0.0
 var spark_count: int = 10
 var spin_offset: float = 0.0
 var se_player: AudioStreamPlayer2D = null
+var se_variant: String = "normal"
 
 const SE_MIX_RATE := 22050
 const SE_DURATION := 0.16
@@ -14,12 +15,14 @@ const SE_DURATION := 0.16
 func _ready() -> void:
 	spin_offset = float(get_instance_id() % 17) * 0.23
 	z_index = 50
-	_play_death_se()
+	if DisplayServer.get_name() != "headless":
+		_play_death_se()
 	queue_redraw()
 
-func configure(color: Color, radius: float = 14.0) -> void:
+func configure(color: Color, radius: float = 14.0, variant: String = "normal") -> void:
 	base_color = color
 	base_radius = maxf(6.0, radius)
+	se_variant = variant
 
 func _process(delta: float) -> void:
 	elapsed += delta
@@ -50,7 +53,30 @@ func _draw() -> void:
 func _play_death_se() -> void:
 	se_player = AudioStreamPlayer2D.new()
 	se_player.max_distance = 1800.0
-	se_player.volume_db = -8.0
+	var start_freq := 900.0
+	var end_freq := 210.0
+	var noise_mix := 0.22
+	var se_duration := SE_DURATION
+	var volume_db := -8.0
+	match se_variant:
+		"elite":
+			start_freq = 1050.0
+			end_freq = 250.0
+			noise_mix = 0.18
+			se_duration = 0.18
+			volume_db = -6.5
+		"boss":
+			start_freq = 1280.0
+			end_freq = 170.0
+			noise_mix = 0.14
+			se_duration = 0.24
+			volume_db = -4.0
+		_:
+			pass
+	var pitch_jitter := randf_range(0.94, 1.06)
+	start_freq *= pitch_jitter
+	end_freq *= pitch_jitter
+	se_player.volume_db = volume_db
 	var stream := AudioStreamGenerator.new()
 	stream.mix_rate = SE_MIX_RATE
 	stream.buffer_length = 0.22
@@ -61,15 +87,15 @@ func _play_death_se() -> void:
 	var playback := se_player.get_stream_playback() as AudioStreamGeneratorPlayback
 	if playback == null:
 		return
-	var total_frames := int(SE_MIX_RATE * SE_DURATION)
+	var total_frames := int(SE_MIX_RATE * se_duration)
 	var frames_available := playback.get_frames_available()
 	var write_count := mini(total_frames, frames_available)
 	for i in range(write_count):
 		var progress := float(i) / float(maxi(1, total_frames - 1))
-		var freq := lerpf(900.0, 210.0, progress)
+		var freq := lerpf(start_freq, end_freq, progress)
 		var time_sec := float(i) / float(SE_MIX_RATE)
 		var envelope := pow(1.0 - progress, 1.8)
 		var tone := sin(TAU * freq * time_sec)
-		var grit := randf_range(-1.0, 1.0) * 0.22
+		var grit := randf_range(-1.0, 1.0) * noise_mix
 		var sample := clampf((tone * 0.68 + grit) * envelope, -1.0, 1.0)
 		playback.push_frame(Vector2(sample, sample))

@@ -1,4 +1,5 @@
 extends CharacterBody2D
+const HIT_SPARK_FX_SCRIPT := preload("res://scenes/effects/hit_spark_fx.gd")
 
 enum State {
 	IDLE, MOVE, ATTACK_1, ATTACK_2, ATTACK_3,
@@ -68,6 +69,8 @@ var low_hp_damage_multiplier: float = 1.0
 var low_hp_damage_threshold: float = 0.35
 var guard_stamina_multiplier: float = 1.0
 var bullet_clear_on_guard: bool = false
+var hitstop_enabled: bool = true
+var combat_fx_enabled: bool = true
 
 signal debug_log(msg: String)
 signal hp_changed(current: int, maximum: int)
@@ -448,15 +451,25 @@ func _check_attack_hits() -> void:
 		if kb_dir.x == 0.0:
 			kb_dir.x = signf(forward)
 		enemy.take_damage(scaled_dmg, poise_dmg, kb_dir.normalized())
+		_spawn_hit_spark(enemy.global_position, kb_dir.normalized(), current_state == State.SKILL_1)
 		_trigger_hitstop()
 		emit_signal("debug_log", "HIT enemy -%d HP" % scaled_dmg)
 
 func _trigger_hitstop() -> void:
+	if not hitstop_enabled:
+		return
+	var restore_scale := maxf(1.0, Engine.time_scale)
 	Engine.time_scale = 0.05
-	get_tree().create_timer(0.06, true, false, true).timeout.connect(_end_hitstop)
+	get_tree().create_timer(0.06, true, false, true).timeout.connect(
+		func() -> void:
+			Engine.time_scale = restore_scale
+	)
 
-func _end_hitstop() -> void:
-	Engine.time_scale = 1.0
+func set_hitstop_enabled(enabled: bool) -> void:
+	hitstop_enabled = enabled
+
+func set_combat_fx_enabled(enabled: bool) -> void:
+	combat_fx_enabled = enabled
 
 func _scale_damage(base_damage: int) -> int:
 	return maxi(1, int(round(float(base_damage) * _current_damage_multiplier())))
@@ -518,8 +531,63 @@ func apply_reward(reward: Dictionary) -> void:
 		_:
 			emit_signal("debug_log", "REWARD: %s" % reward.get("name", reward_id))
 
+func _spawn_hit_spark(world_pos: Vector2, hit_dir: Vector2, heavy: bool = false) -> void:
+	if not combat_fx_enabled:
+		return
+	var parent_node := get_parent()
+	if not parent_node:
+		return
+	var fx := Node2D.new()
+	fx.set_script(HIT_SPARK_FX_SCRIPT)
+	fx.global_position = world_pos + Vector2(0.0, -8.0)
+	if fx.has_method("configure"):
+		var color := Color(0.58, 0.9, 1.0, 0.95)
+		if heavy:
+			color = Color(1.0, 0.82, 0.42, 0.95)
+		fx.call("configure", hit_dir, color, heavy)
+	parent_node.add_child(fx)
+
 func set_virtual_move_axis(axis: float) -> void:
 	virtual_move_axis = clampf(axis, -1.0, 1.0)
+
+func ai_attack() -> void:
+	if _is_locked():
+		return
+	_try_attack()
+
+func ai_roll() -> void:
+	if _is_locked():
+		return
+	if _can_use_stamina(roll_stamina):
+		_enter_roll()
+
+func ai_guard_start() -> void:
+	if _is_locked():
+		return
+	if current_state != State.PARRY and current_state != State.GUARD:
+		_enter_guard()
+
+func ai_guard_end() -> void:
+	if current_state == State.GUARD:
+		_change_state(State.IDLE)
+
+func ai_estus() -> void:
+	if _is_locked():
+		return
+	if estus_charges > 0 and _can_use_stamina(estus_stamina):
+		_enter_estus()
+
+func ai_skill1() -> void:
+	if _is_locked():
+		return
+	if skill1_cd <= 0 and _can_use_stamina(18.0):
+		_enter_skill1()
+
+func ai_skill2() -> void:
+	if _is_locked():
+		return
+	if skill2_cd <= 0 and _can_use_stamina(18.0):
+		_enter_skill2()
 
 func _can_use_stamina(cost: float) -> bool:
 	return stamina >= cost

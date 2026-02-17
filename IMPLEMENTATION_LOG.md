@@ -135,6 +135,20 @@
 - Rationale: 吹っ飛びの違和感を抑えつつ、視認性とスタイリッシュさを両立するため
 - Notes: ノックバックはdeltaスケール加算へ変更、`player.tscn` / `base_enemy.tscn` のカプセルも縮小
 
+### 2026-02-18（KPI自動計測基盤）
+
+- Decision: `main.gd` に `--kpi_autorun=N` の自動計測モードを追加（自動操作・自動再挑戦・結果保存）
+- Rationale: 手動20ランの工数を下げ、KPI調整ループを短縮するため
+- Notes: `KPI_AUTORUN_LOG.md` へ集計を書き出す。オート計測時はヒットストップ/演出FXを軽量化
+
+- Decision: プレイヤーにAI制御用API（`ai_attack/roll/guard/skill/estus`）を追加
+- Rationale: Input擬似押下よりも再現性高く制御できるため
+- Notes: 通常操作には影響なし
+
+- Decision: ヒットストップ復帰を「直前のtime_scaleへ戻す」方式へ変更
+- Rationale: 高速検証時に `Engine.time_scale` が1.0へ固定される問題を防ぐため
+- Notes: `set_hitstop_enabled(false)` で計測モード中は無効化可能
+
 ---
 
 ## コリジョンレイヤー設計
@@ -151,4 +165,6 @@
 
 ## 既知のバグ / TODO
 
-- TODO: 実プレイ20ラン程度でKPI収束ログを採取し、最終係数（HP/DMG/増援）を固定化
+- TODO: `--kpi_autorun=20` を実行し、`KPI_AUTORUN_LOG.md` の統計（平均時間/到達率/撃破率）を更新
+- TODO: オート操作時の1F早期敗北率が高いので、移動距離とガード/回避閾値をもう1段調整
+- TODO: 通常実行でクラッシュ再発有無を実機確認（ログ出力先を固定した起動条件含む）

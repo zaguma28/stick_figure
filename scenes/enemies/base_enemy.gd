@@ -3,6 +3,7 @@ class_name BaseEnemy
 
 enum EnemyState { IDLE, CHASE, TELEGRAPH, ATTACK, STAGGER, DOWN, DEAD }
 const ENEMY_DEATH_FX_SCRIPT := preload("res://scenes/effects/enemy_death_fx.gd")
+static var death_fx_enabled: bool = true
 
 @export var max_hp: int = 50
 @export var move_speed: float = 100.0
@@ -246,6 +247,8 @@ func _die() -> void:
 	tween.tween_callback(queue_free)
 
 func _spawn_death_fx() -> void:
+	if not BaseEnemy.death_fx_enabled:
+		return
 	var parent_node := get_parent()
 	if not parent_node:
 		return
@@ -253,8 +256,15 @@ func _spawn_death_fx() -> void:
 	fx.set_script(ENEMY_DEATH_FX_SCRIPT)
 	fx.global_position = global_position + Vector2(0.0, -8.0)
 	if fx.has_method("configure"):
-		var fx_radius := 22.0 if max_hp >= 500 else 14.0
-		fx.call("configure", Color(1.0, 0.42, 0.22, 0.95), fx_radius)
+		var fx_radius := 13.0
+		var se_variant := "normal"
+		if max_hp >= 500:
+			fx_radius = 22.0
+			se_variant = "boss"
+		elif max_hp >= 90:
+			fx_radius = 16.0
+			se_variant = "elite"
+		fx.call("configure", Color(1.0, 0.42, 0.22, 0.95), fx_radius, se_variant)
 	parent_node.add_child(fx)
 
 func _draw() -> void:
