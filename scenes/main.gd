@@ -11,6 +11,7 @@ var spreader_script: GDScript = preload("res://scenes/enemies/spreader.gd")
 var shield_script: GDScript = preload("res://scenes/enemies/shield_enemy.gd")
 var bomber_script: GDScript = preload("res://scenes/enemies/bomber.gd")
 var summoner_script: GDScript = preload("res://scenes/enemies/summoner.gd")
+var boss_script: GDScript = preload("res://scenes/enemies/boss_eraser.gd")
 
 const TOTAL_FLOORS := 10
 const FLOOR_CLEAR_DELAY := 1.2
@@ -137,9 +138,9 @@ var floor_definitions: Array[Dictionary] = [
 		"name": "事件: 深淵の契約"
 	},
 	{
-		"type": "boss_proxy",
-		"name": "BOSS FLOOR (仮): 精鋭ラッシュ",
-		"enemies": ["shield", "summoner", "spreader", "charger", "bomber"]
+		"type": "boss",
+		"name": "消しゴム神（3フェーズ）",
+		"enemies": ["boss"]
 	}
 ]
 
@@ -224,11 +225,11 @@ func _start_floor(floor_number: int) -> void:
 	var floor_name: String = floor_data.get("name", "")
 	_update_hud_floor(floor_type, floor_name)
 	match floor_type:
-		"combat", "boss_proxy":
+		"combat", "boss":
 			_spawn_floor_enemies(floor_data.get("enemies", []))
 			floor_phase = "combat"
-			if floor_type == "boss_proxy":
-				_set_run_message("10F: 仮ボスフロア開始（本ボスはSprint 4で実装）")
+			if floor_type == "boss":
+				_set_run_message("10F: 消しゴム神 出現")
 			else:
 				_set_run_message("F%d 開始" % current_floor)
 		"event":
@@ -281,6 +282,8 @@ func _get_enemy_script(enemy_key: String) -> GDScript:
 			return bomber_script
 		"summoner":
 			return summoner_script
+		"boss":
+			return boss_script
 		_:
 			return null
 
@@ -538,7 +541,7 @@ func _update_hud_floor(floor_type: String, floor_name: String) -> void:
 	var type_label := "COMBAT"
 	if floor_type == "event":
 		type_label = "EVENT"
-	elif floor_type == "boss_proxy":
+	elif floor_type == "boss":
 		type_label = "BOSS"
 	hud.set_floor_info(current_floor, TOTAL_FLOORS, type_label, floor_name)
 

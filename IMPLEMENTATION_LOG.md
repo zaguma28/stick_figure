@@ -78,6 +78,12 @@
 - Rationale: Done条件「9Fまでに救済が提示される」を満たす最短実装
 - Notes: 救済キーは `strong_guard / bullet_clear / roll_stable / low_hp_damage`
 
+### 2026-02-17（Sprint 4.1 着手）
+
+- Decision: 10Fを `boss_proxy` から本ボス `boss_eraser.gd` へ置換
+- Rationale: BOSS_PATTERN.mdの3フェーズ秒刻みをスクリプト内タイムラインで管理するため
+- Notes: P1/P2/P3のループ、予兆表示、弾幕・突進・押しつぶし・大技（弾雨）を実装
+
 ---
 
 ## コリジョンレイヤー設計
@@ -96,6 +102,6 @@
 
 - TODO: 敵同士の衝突回避（現在は重なる）
 - TODO: 敵死亡時のSE/エフェクト
-- TODO: 10Fの本ボス実装（現状は仮ボスフロア）
+- TODO: 本ボスの実機検証と挙動微調整（フェーズ遷移/秒刻み誤差）
 - TODO: virtual_joystickとキーボード入力の統合
 - TODO: Godot実機検証（報酬選択UI、タグ重み、9F救済候補の提示）
