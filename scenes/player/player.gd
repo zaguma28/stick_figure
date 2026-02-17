@@ -22,6 +22,10 @@ var attack_damage := [10, 10, 18]
 var attack_stamina := [18.0, 18.0, 26.0]
 var attack_poise := [8, 8, 14]
 var attack3_recovery := 0.30
+var skill1_damage: int = 42
+var skill2_damage: int = 24
+var skill1_poise_damage: int = 18
+var skill2_poise_damage: int = 12
 
 @export var roll_stamina: float = 28.0
 @export var roll_iframes: float = 0.24
@@ -58,6 +62,11 @@ var skill2_cd: float = 0.0
 
 var attack_hit_ids: Array = []
 var _last_attack: int = 0
+var bonus_damage_multiplier: float = 1.0
+var low_hp_damage_multiplier: float = 1.0
+var low_hp_damage_threshold: float = 0.35
+var guard_stamina_multiplier: float = 1.0
+var bullet_clear_on_guard: bool = false
 
 signal debug_log(msg: String)
 signal hp_changed(current: int, maximum: int)
@@ -227,6 +236,10 @@ func _enter_parry() -> void:
 func _enter_guard() -> void:
 	_change_state(State.GUARD)
 	emit_signal("debug_log", "GUARD (%d%% reduction)" % int(guard_reduction * 100))
+	if bullet_clear_on_guard:
+		var removed := _clear_enemy_projectiles(220.0)
+		if removed > 0:
+			emit_signal("debug_log", "GUARD WAVE: 弾消し x%d" % removed)
 
 func _try_attack() -> void:
 	var stage := 0
@@ -282,14 +295,14 @@ func _enter_skill1() -> void:
 	_change_state(State.SKILL_1)
 	state_timer = 0.35
 	skill1_cd = 6.0
-	emit_signal("debug_log", "SKILL1: thrust (dmg:42 CT:6s)")
+	emit_signal("debug_log", "SKILL1: thrust (dmg:%d CT:6s)" % skill1_damage)
 
 func _enter_skill2() -> void:
 	_consume_stamina(18.0)
 	_change_state(State.SKILL_2)
 	state_timer = 0.40
 	skill2_cd = 9.0
-	emit_signal("debug_log", "SKILL2: spin slash (dmg:24 CT:9s)")
+	emit_signal("debug_log", "SKILL2: spin slash (dmg:%d CT:9s)" % skill2_damage)
 
 func take_damage(amount: int, _poise_damage: int = 0, source: Node = null) -> void:
 	if iframes_timer > 0:
@@ -308,7 +321,7 @@ func take_damage(amount: int, _poise_damage: int = 0, source: Node = null) -> vo
 	elif current_state == State.GUARD:
 		var reduced := int(amount * (1.0 - guard_reduction))
 		hp -= reduced
-		stamina -= guard_stamina_per_hit
+		stamina -= guard_stamina_per_hit * guard_stamina_multiplier
 		stamina_delay_timer = stamina_delay
 		emit_signal("debug_log", "GUARD HIT -%d HP" % reduced)
 		if stamina <= 0:
@@ -339,12 +352,13 @@ func _check_attack_hits() -> void:
 		State.ATTACK_3:
 			atk_range = 68.0; dmg = attack_damage[2]; poise_dmg = attack_poise[2]
 		State.SKILL_1:
-			atk_range = 82.0; dmg = 42; poise_dmg = 18
+			atk_range = 82.0; dmg = skill1_damage; poise_dmg = skill1_poise_damage
 		State.SKILL_2:
-			atk_range = 76.0; dmg = 24; poise_dmg = 12; vertical_tolerance = 84.0
+			atk_range = 76.0; dmg = skill2_damage; poise_dmg = skill2_poise_damage; vertical_tolerance = 84.0
 		_:
 			return
 
+	var scaled_dmg := _scale_damage(dmg)
 	var forward := facing_dir.x
 	if forward == 0.0:
 		forward = 1.0
@@ -367,9 +381,9 @@ func _check_attack_hits() -> void:
 		var kb_dir := Vector2(signf(dx), -0.12)
 		if kb_dir.x == 0.0:
 			kb_dir.x = signf(forward)
-		enemy.take_damage(dmg, poise_dmg, kb_dir.normalized())
+		enemy.take_damage(scaled_dmg, poise_dmg, kb_dir.normalized())
 		_trigger_hitstop()
-		emit_signal("debug_log", "HIT enemy -%d HP" % dmg)
+		emit_signal("debug_log", "HIT enemy -%d HP" % scaled_dmg)
 
 func _trigger_hitstop() -> void:
 	Engine.time_scale = 0.05
@@ -377,6 +391,66 @@ func _trigger_hitstop() -> void:
 
 func _end_hitstop() -> void:
 	Engine.time_scale = 1.0
+
+func _scale_damage(base_damage: int) -> int:
+	return maxi(1, int(round(float(base_damage) * _current_damage_multiplier())))
+
+func _current_damage_multiplier() -> float:
+	var mult := bonus_damage_multiplier
+	if max_hp > 0 and float(hp) / float(max_hp) <= low_hp_damage_threshold:
+		mult *= low_hp_damage_multiplier
+	return mult
+
+func _clear_enemy_projectiles(radius: float) -> int:
+	var removed := 0
+	for node in get_tree().get_nodes_in_group("enemy_projectiles"):
+		var projectile := node as Node2D
+		if not projectile:
+			continue
+		if projectile.global_position.distance_to(global_position) <= radius:
+			projectile.queue_free()
+			removed += 1
+	return removed
+
+func apply_reward(reward: Dictionary) -> void:
+	var reward_id: String = str(reward.get("id", ""))
+	match reward_id:
+		"strong_guard_unlock":
+			guard_reduction = 0.65
+			guard_stamina_multiplier = minf(guard_stamina_multiplier, 0.65)
+			emit_signal("debug_log", "REWARD: 強ガード解放")
+		"bullet_sweep_guard":
+			bullet_clear_on_guard = true
+			emit_signal("debug_log", "REWARD: 弾消しガード")
+		"roll_iframe_plus":
+			roll_iframes += 0.05
+			emit_signal("debug_log", "REWARD: 回避無敵 +0.05s")
+		"roll_cost_down":
+			roll_stamina = maxf(8.0, roll_stamina * 0.85)
+			emit_signal("debug_log", "REWARD: ロール消費 -15%")
+		"low_hp_fury":
+			low_hp_damage_multiplier = maxf(low_hp_damage_multiplier, 1.35)
+			emit_signal("debug_log", "REWARD: 低HP火力 +35%")
+		"poise_breaker":
+			attack_poise[0] += 2
+			attack_poise[1] += 2
+			attack_poise[2] += 4
+			skill1_poise_damage += 4
+			skill2_poise_damage += 3
+			emit_signal("debug_log", "REWARD: 体幹削り強化")
+		"focus_parry":
+			parry_window += 0.03
+			parry_stamina = maxf(12.0, parry_stamina * 0.85)
+			emit_signal("debug_log", "REWARD: パリィ窓 +0.03s")
+		"thrust_amp":
+			skill1_damage += 8
+			bonus_damage_multiplier *= 1.05
+			emit_signal("debug_log", "REWARD: 突き強化")
+		"stamina_flow":
+			stamina_regen += 5.0
+			emit_signal("debug_log", "REWARD: スタミナ回復 +5/s")
+		_:
+			emit_signal("debug_log", "REWARD: %s" % reward.get("name", reward_id))
 
 func _can_use_stamina(cost: float) -> bool:
 	return stamina >= cost

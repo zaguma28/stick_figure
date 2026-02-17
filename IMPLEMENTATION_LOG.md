@@ -23,8 +23,8 @@
 - [x] Sprint 2.2 敵AI 6種
 - [x] Sprint 2.3 体幹
 - [x] Sprint 3.1 フロア進行
-- [ ] Sprint 3.2 報酬3択
-- [ ] Sprint 3.3 詰み防止
+- [x] Sprint 3.2 報酬3択
+- [x] Sprint 3.3 詰み防止
 - [ ] Sprint 4.1 ボス3フェーズ
 - [ ] Sprint 4.2 バランス調整
 
@@ -62,6 +62,22 @@
 - Rationale: SPEC.mdの係数（HP 1+0.08*(floor-1), DMG 1+0.06*(floor-1)）を敵種類に依存せず適用するため
 - Notes: Summonerの召喚ミニオンにも同一スケールを継承
 
+### 2026-02-17（Sprint 3.2 / 3.3）
+
+- Decision: 報酬3択は `main.gd` 内で完結させ、フロア遷移フェーズに `reward_select` を追加
+- Rationale: 既存のフロア進行ロジック（combat/event/clear）へ最小差分で組み込めるため
+- Notes: 1/2/3キー選択、HUDに候補名+説明を表示
+
+- Decision: タグ重み付けは「所持タグ数の最大値」で倍率を適用（0→x1.0、1→x1.3、2以上→x1.8）
+- Rationale: 複数タグ報酬でも計算が単純で、ビルド方向への収束を作りやすい
+
+- Decision: 3択の1枠を別系統にするため、主タグプール2枠 + 非主タグプール1枠を優先抽選
+- Rationale: SPECの「1枠は別系統」を常に満たしつつ、乗り換え余地を残すため
+
+- Decision: 9F天井は「9F時点で救済未所持なら、救済報酬を候補に強制混入」で実装
+- Rationale: Done条件「9Fまでに救済が提示される」を満たす最短実装
+- Notes: 救済キーは `strong_guard / bullet_clear / roll_stable / low_hp_damage`
+
 ---
 
 ## コリジョンレイヤー設計
@@ -82,4 +98,4 @@
 - TODO: 敵死亡時のSE/エフェクト
 - TODO: 10Fの本ボス実装（現状は仮ボスフロア）
 - TODO: virtual_joystickとキーボード入力の統合
-- TODO: Godotの検証を行う（1F→10Fの遷移とイベント/クリア表示）
+- TODO: Godot実機検証（報酬選択UI、タグ重み、9F救済候補の提示）

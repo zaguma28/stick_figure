@@ -48,9 +48,54 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.9, 0.4, 1)
 text = ""
 
+[node name="RewardTagLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.76, 0.9, 1, 1)
+text = "Build: (none)"
+
 [node name="StateLabel" type="Label" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
 text = "State: IDLE"
+
+[node name="RewardPanel" type="PanelContainer" parent="."]
+visible = false
+anchors_preset = 10
+anchor_left = 0.5
+anchor_top = 0.2
+anchor_right = 0.5
+anchor_bottom = 0.2
+offset_left = -350.0
+offset_top = 0.0
+offset_right = 350.0
+offset_bottom = 180.0
+grow_horizontal = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="RewardPanel"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="RewardTitleLabel" type="Label" parent="RewardPanel/VBoxContainer"]
+layout_mode = 2
+horizontal_alignment = 1
+theme_override_colors/font_color = Color(1, 0.95, 0.5, 1)
+text = "報酬選択"
+
+[node name="RewardHintLabel" type="Label" parent="RewardPanel/VBoxContainer"]
+layout_mode = 2
+horizontal_alignment = 1
+text = "1/2/3キーで選択"
+
+[node name="RewardOption1" type="Label" parent="RewardPanel/VBoxContainer"]
+layout_mode = 2
+text = "[1] ---"
+
+[node name="RewardOption2" type="Label" parent="RewardPanel/VBoxContainer"]
+layout_mode = 2
+text = "[2] ---"
+
+[node name="RewardOption3" type="Label" parent="RewardPanel/VBoxContainer"]
+layout_mode = 2
+text = "[3] ---"
 
 [node name="DebugContainer" type="MarginContainer" parent="."]
 anchors_preset = 9
@@ -83,4 +128,4 @@ theme_override_constants/margin_bottom = 8
 [node name="KeymapLabel" type="Label" parent="KeymapContainer"]
 layout_mode = 2
 horizontal_alignment = 1
-text = "WASD:Move  J:Attack  K:Roll  L:Guard/Parry  H:Estus  1/2:Skill"
+text = "WASD:Move  J:Attack  K:Roll  L:Guard/Parry  H:Estus  1/2:Skill  Reward:1/2/3"

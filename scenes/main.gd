@@ -26,6 +26,71 @@ const ENEMY_SPAWN_END_X := 2100.0
 const ENEMY_SPAWN_Y := 470.0
 const SPAWN_JITTER_X := 120.0
 const SPAWN_JITTER_Y := 18.0
+const REWARD_WEIGHT_SINGLE := 1.3
+const REWARD_WEIGHT_MULTI := 1.8
+const REWARD_CHOICE_COUNT := 3
+
+const REWARD_POOL := [
+	{
+		"id": "strong_guard_unlock",
+		"name": "強ガード解放",
+		"desc": "ガード軽減30%→65%、被弾時スタミナ消費-35%",
+		"tags": ["guard", "poise"],
+		"rescue_keys": ["strong_guard"]
+	},
+	{
+		"id": "bullet_sweep_guard",
+		"name": "弾消しガード",
+		"desc": "ガード開始時に近距離の弾を消去",
+		"tags": ["bullet", "guard"],
+		"rescue_keys": ["bullet_clear"]
+	},
+	{
+		"id": "roll_iframe_plus",
+		"name": "回避無敵+",
+		"desc": "ロール無敵 +0.05秒",
+		"tags": ["dodge"],
+		"rescue_keys": ["roll_stable"]
+	},
+	{
+		"id": "roll_cost_down",
+		"name": "ロール軽量化",
+		"desc": "ロール消費スタミナ -15%",
+		"tags": ["dodge"],
+		"rescue_keys": ["roll_stable"]
+	},
+	{
+		"id": "low_hp_fury",
+		"name": "背水の刃",
+		"desc": "HP35%以下で与ダメ +35%",
+		"tags": ["crit", "bleed"],
+		"rescue_keys": ["low_hp_damage"]
+	},
+	{
+		"id": "poise_breaker",
+		"name": "体幹砕き",
+		"desc": "通常/スキルの体幹ダメージ増加",
+		"tags": ["poise"]
+	},
+	{
+		"id": "focus_parry",
+		"name": "見切りの眼",
+		"desc": "パリィ受付 +0.03秒、消費-15%",
+		"tags": ["parry", "guard"]
+	},
+	{
+		"id": "thrust_amp",
+		"name": "致命の突き",
+		"desc": "直線突き強化、全体与ダメ微増",
+		"tags": ["crit", "parry"]
+	},
+	{
+		"id": "stamina_flow",
+		"name": "呼吸法",
+		"desc": "スタミナ回復 +5/秒",
+		"tags": ["dodge", "guard"]
+	}
+]
 
 var floor_definitions: Array[Dictionary] = [
 	{
@@ -82,8 +147,15 @@ var current_floor: int = 1
 var floor_phase: String = "idle"
 var floor_timer: float = 0.0
 var run_finished: bool = false
+var floor_reward_offered: bool = false
+var reward_options: Array[Dictionary] = []
+var reward_guaranteed_this_floor: bool = false
+var owned_reward_ids: Dictionary = {}
+var owned_tag_counts: Dictionary = {}
+var owned_rescue_keys: Dictionary = {}
 
 func _ready() -> void:
+	randomize()
 	RenderingServer.set_default_clear_color(Color(0.08, 0.08, 0.12))
 	player.add_to_group("player")
 	hud.setup(player)
@@ -104,18 +176,49 @@ func _process(delta: float) -> void:
 		"event_wait", "clear_wait":
 			floor_timer -= delta
 			if floor_timer <= 0:
-				_go_to_next_floor()
+				_progress_after_floor()
+		"reward_select":
+			pass
+
+func _unhandled_input(event: InputEvent) -> void:
+	if floor_phase != "reward_select":
+		return
+	if not (event is InputEventKey):
+		return
+	var key_event := event as InputEventKey
+	if not key_event.pressed or key_event.echo:
+		return
+	var selected := -1
+	match key_event.keycode:
+		KEY_1, KEY_KP_1:
+			selected = 0
+		KEY_2, KEY_KP_2:
+			selected = 1
+		KEY_3, KEY_KP_3:
+			selected = 2
+	if selected >= 0:
+		_select_reward(selected)
+		get_viewport().set_input_as_handled()
 
 func _start_run() -> void:
 	run_finished = false
 	current_floor = 1
 	floor_phase = "idle"
+	owned_reward_ids.clear()
+	owned_tag_counts.clear()
+	owned_rescue_keys.clear()
+	reward_options.clear()
 	_start_floor(current_floor)
 
 func _start_floor(floor_number: int) -> void:
 	_clear_current_floor_nodes()
 	player.position = PLAYER_START
 	player.velocity = Vector2.ZERO
+	floor_reward_offered = false
+	reward_guaranteed_this_floor = false
+	reward_options.clear()
+	if hud.has_method("hide_reward_options"):
+		hud.hide_reward_options()
 	var floor_data := floor_definitions[floor_number - 1]
 	var floor_type: String = floor_data.get("type", "combat")
 	var floor_name: String = floor_data.get("name", "")
@@ -209,7 +312,16 @@ func _is_combat_cleared() -> bool:
 func _on_floor_cleared() -> void:
 	floor_phase = "clear_wait"
 	floor_timer = FLOOR_CLEAR_DELAY
-	_set_run_message("F%d CLEAR" % current_floor)
+	_set_run_message("F%d CLEAR - 報酬選択へ" % current_floor)
+
+func _progress_after_floor() -> void:
+	if current_floor >= TOTAL_FLOORS:
+		_finish_run()
+		return
+	if _should_offer_reward_for_floor() and not floor_reward_offered:
+		_begin_reward_selection()
+		return
+	_go_to_next_floor()
 
 func _go_to_next_floor() -> void:
 	if current_floor >= TOTAL_FLOORS:
@@ -222,8 +334,197 @@ func _finish_run() -> void:
 	run_finished = true
 	floor_phase = "finished"
 	_clear_current_floor_nodes()
+	if hud.has_method("hide_reward_options"):
+		hud.hide_reward_options()
 	_set_run_message("RUN CLEAR! 10F 完走")
 	player.emit_signal("debug_log", "RUN CLEAR (Sprint 3.1達成)")
+
+func _should_offer_reward_for_floor() -> bool:
+	return current_floor < TOTAL_FLOORS
+
+func _begin_reward_selection() -> void:
+	floor_reward_offered = true
+	reward_options = _generate_reward_options()
+	if reward_options.is_empty():
+		_set_run_message("報酬候補なし -> 次フロア")
+		_go_to_next_floor()
+		return
+	floor_phase = "reward_select"
+	var hint := "報酬選択: 1/2/3 キー"
+	if reward_guaranteed_this_floor:
+		hint += "（9F救済候補を含む）"
+	_set_run_message(hint)
+	if hud.has_method("show_reward_options"):
+		hud.show_reward_options(current_floor, reward_options, reward_guaranteed_this_floor)
+
+func _select_reward(option_index: int) -> void:
+	if option_index < 0 or option_index >= reward_options.size():
+		return
+	var reward := reward_options[option_index]
+	_apply_reward(reward)
+	if hud.has_method("hide_reward_options"):
+		hud.hide_reward_options()
+	_set_run_message("取得: %s" % reward.get("name", "UNKNOWN"))
+	_go_to_next_floor()
+
+func _apply_reward(reward: Dictionary) -> void:
+	var reward_id: String = str(reward.get("id", ""))
+	if reward_id != "":
+		owned_reward_ids[reward_id] = true
+	var tags: Array = reward.get("tags", [])
+	for tag in tags:
+		var key := str(tag)
+		owned_tag_counts[key] = int(owned_tag_counts.get(key, 0)) + 1
+	var rescue_keys: Array = reward.get("rescue_keys", [])
+	for rescue_key in rescue_keys:
+		owned_rescue_keys[str(rescue_key)] = true
+	if player and player.has_method("apply_reward"):
+		player.apply_reward(reward)
+	if hud.has_method("set_reward_summary"):
+		hud.set_reward_summary(owned_tag_counts)
+	player.emit_signal("debug_log", "REWARD PICK: %s" % reward.get("name", reward_id))
+
+func _generate_reward_options() -> Array[Dictionary]:
+	reward_guaranteed_this_floor = false
+	var available := _get_available_rewards()
+	if available.is_empty():
+		return []
+
+	var primary_tag := _get_primary_tag()
+	var options: Array[Dictionary] = []
+	if primary_tag == "":
+		options = _pick_weighted_unique(available, REWARD_CHOICE_COUNT)
+	else:
+		var same_pool: Array = []
+		var off_pool: Array = []
+		for reward in available:
+			if _reward_has_tag(reward, primary_tag):
+				same_pool.append(reward)
+			else:
+				off_pool.append(reward)
+
+		options.append_array(_pick_weighted_unique(same_pool, mini(2, same_pool.size())))
+		var remaining := REWARD_CHOICE_COUNT - options.size()
+		if remaining > 0 and not off_pool.is_empty():
+			options.append_array(_pick_weighted_unique(off_pool, 1))
+		remaining = REWARD_CHOICE_COUNT - options.size()
+		if remaining > 0:
+			var merged_pool: Array = []
+			merged_pool.append_array(same_pool)
+			merged_pool.append_array(off_pool)
+			var filtered_pool: Array = []
+			for reward in merged_pool:
+				var reward_id := str(reward.get("id", ""))
+				if not _contains_reward_id(options, reward_id):
+					filtered_pool.append(reward)
+			options.append_array(_pick_weighted_unique(filtered_pool, remaining))
+
+	if current_floor >= 9 and not _has_rescue_piece():
+		var rescue_reward := _pick_rescue_reward(available, options)
+		if not rescue_reward.is_empty():
+			reward_guaranteed_this_floor = true
+			var rescue_id := str(rescue_reward.get("id", ""))
+			if not _contains_reward_id(options, rescue_id):
+				if options.size() >= REWARD_CHOICE_COUNT:
+					options[REWARD_CHOICE_COUNT - 1] = rescue_reward
+				else:
+					options.append(rescue_reward)
+
+	return options
+
+func _get_available_rewards() -> Array:
+	var result: Array = []
+	for reward in REWARD_POOL:
+		var reward_id := str(reward.get("id", ""))
+		if reward_id == "":
+			continue
+		if owned_reward_ids.has(reward_id):
+			continue
+		result.append(reward)
+	return result
+
+func _pick_weighted_unique(pool: Array, count: int) -> Array[Dictionary]:
+	var picks: Array[Dictionary] = []
+	if count <= 0:
+		return picks
+	var mutable_pool: Array = pool.duplicate(true)
+	while picks.size() < count and not mutable_pool.is_empty():
+		var idx := _pick_weighted_index(mutable_pool)
+		if idx < 0 or idx >= mutable_pool.size():
+			break
+		picks.append(mutable_pool[idx])
+		mutable_pool.remove_at(idx)
+	return picks
+
+func _pick_weighted_index(pool: Array) -> int:
+	if pool.is_empty():
+		return -1
+	var total_weight := 0.0
+	for reward in pool:
+		total_weight += _reward_weight(reward)
+	if total_weight <= 0.0:
+		return randi_range(0, pool.size() - 1)
+	var roll := randf() * total_weight
+	for i in range(pool.size()):
+		roll -= _reward_weight(pool[i])
+		if roll <= 0.0:
+			return i
+	return pool.size() - 1
+
+func _reward_weight(reward: Dictionary) -> float:
+	var tags: Array = reward.get("tags", [])
+	var max_tag_count := 0
+	for tag in tags:
+		var count := int(owned_tag_counts.get(str(tag), 0))
+		max_tag_count = maxi(max_tag_count, count)
+	if max_tag_count >= 2:
+		return REWARD_WEIGHT_MULTI
+	if max_tag_count == 1:
+		return REWARD_WEIGHT_SINGLE
+	return 1.0
+
+func _get_primary_tag() -> String:
+	var primary_tag := ""
+	var best_count := 0
+	for key in owned_tag_counts.keys():
+		var count := int(owned_tag_counts[key])
+		if count > best_count:
+			best_count = count
+			primary_tag = str(key)
+	return primary_tag
+
+func _reward_has_tag(reward: Dictionary, tag: String) -> bool:
+	var tags: Array = reward.get("tags", [])
+	return tags.has(tag)
+
+func _contains_reward_id(rewards: Array, reward_id: String) -> bool:
+	for reward in rewards:
+		if str(reward.get("id", "")) == reward_id:
+			return true
+	return false
+
+func _is_rescue_reward(reward: Dictionary) -> bool:
+	var rescue_keys: Array = reward.get("rescue_keys", [])
+	return not rescue_keys.is_empty()
+
+func _has_rescue_piece() -> bool:
+	return owned_rescue_keys.size() > 0
+
+func _pick_rescue_reward(available: Array, options: Array[Dictionary]) -> Dictionary:
+	var candidates: Array = []
+	for reward in available:
+		if not _is_rescue_reward(reward):
+			continue
+		var reward_id := str(reward.get("id", ""))
+		if _contains_reward_id(options, reward_id):
+			continue
+		candidates.append(reward)
+	if candidates.is_empty():
+		return {}
+	var picked := _pick_weighted_unique(candidates, 1)
+	if picked.is_empty():
+		return {}
+	return picked[0]
 
 func _clear_current_floor_nodes() -> void:
 	for node in get_tree().get_nodes_in_group("enemies"):
