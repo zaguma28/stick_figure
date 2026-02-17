@@ -74,9 +74,57 @@ signal stamina_changed(current: float, maximum: float)
 signal estus_changed(current: int, maximum: int)
 
 func _ready() -> void:
+	reset_for_new_run()
+
+func reset_for_new_run() -> void:
+	max_hp = 100
+	max_stamina = 100.0
+	stamina_regen = 22.0
+	stamina_delay = 0.25
+	move_speed = 276.0
+	iframes_duration = 0.35
+	roll_stamina = 28.0
+	roll_iframes = 0.24
+	roll_recovery = 0.14
+	roll_distance = 168.0
+	parry_stamina = 24.0
+	parry_window = 0.18
+	parry_fail_stagger = 0.35
+	estus_stamina = 16.0
+	estus_heal = 35
+	estus_max_charges = 3
+	guard_reduction = 0.30
+	guard_stamina_per_hit = 22.0
+	guard_break_stagger = 0.6
+	attack_damage = [10, 10, 18]
+	attack_stamina = [18.0, 18.0, 26.0]
+	attack_poise = [8, 8, 14]
+	attack3_recovery = 0.30
+	skill1_damage = 42
+	skill2_damage = 24
+	skill1_poise_damage = 18
+	skill2_poise_damage = 12
+	bonus_damage_multiplier = 1.0
+	low_hp_damage_multiplier = 1.0
+	low_hp_damage_threshold = 0.35
+	guard_stamina_multiplier = 1.0
+	bullet_clear_on_guard = false
 	hp = max_hp
 	stamina = max_stamina
 	estus_charges = estus_max_charges
+	current_state = State.IDLE
+	move_axis = 0.0
+	facing_dir = Vector2.RIGHT
+	velocity = Vector2.ZERO
+	stamina_delay_timer = 0.0
+	state_timer = 0.0
+	iframes_timer = 0.0
+	parry_active_timer = 0.0
+	combo_window_timer = 0.0
+	skill1_cd = 0.0
+	skill2_cd = 0.0
+	attack_hit_ids.clear()
+	_last_attack = 0
 	emit_signal("hp_changed", hp, max_hp)
 	emit_signal("stamina_changed", stamina, max_stamina)
 	emit_signal("estus_changed", estus_charges, estus_max_charges)

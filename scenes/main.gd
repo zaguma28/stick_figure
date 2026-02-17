@@ -30,6 +30,9 @@ const SPAWN_JITTER_Y := 18.0
 const REWARD_WEIGHT_SINGLE := 1.3
 const REWARD_WEIGHT_MULTI := 1.8
 const REWARD_CHOICE_COUNT := 3
+const TARGET_FLOOR_TIME_MIN := 35.0
+const TARGET_FLOOR_TIME_MAX := 60.0
+const REINFORCEMENT_TRIGGER_TIME := 28.0
 
 const REWARD_POOL := [
 	{
@@ -148,12 +151,24 @@ var current_floor: int = 1
 var floor_phase: String = "idle"
 var floor_timer: float = 0.0
 var run_finished: bool = false
+var current_floor_data: Dictionary = {}
+var floor_start_msec: int = 0
+var floor_reinforcement_spawned: bool = false
 var floor_reward_offered: bool = false
 var reward_options: Array[Dictionary] = []
 var reward_guaranteed_this_floor: bool = false
 var owned_reward_ids: Dictionary = {}
 var owned_tag_counts: Dictionary = {}
 var owned_rescue_keys: Dictionary = {}
+var run_boss_reached: bool = false
+var run_combat_floor_time_total: float = 0.0
+var run_combat_floor_count: int = 0
+var run_floor_times: Dictionary = {}
+var session_run_count: int = 0
+var session_boss_reach_count: int = 0
+var session_boss_clear_count: int = 0
+var session_total_combat_floor_time: float = 0.0
+var session_total_combat_floor_count: int = 0
 
 func _ready() -> void:
 	randomize()
@@ -170,6 +185,9 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if run_finished:
 		return
+	if player and player.hp <= 0:
+		_fail_run()
+		return
 	match floor_phase:
 		"combat":
 			if _is_combat_cleared():
@@ -182,12 +200,17 @@ func _process(delta: float) -> void:
 			pass
 
 func _unhandled_input(event: InputEvent) -> void:
-	if floor_phase != "reward_select":
-		return
 	if not (event is InputEventKey):
 		return
 	var key_event := event as InputEventKey
 	if not key_event.pressed or key_event.echo:
+		return
+	if run_finished:
+		if key_event.keycode == KEY_R:
+			_start_run()
+			get_viewport().set_input_as_handled()
+		return
+	if floor_phase != "reward_select":
 		return
 	var selected := -1
 	match key_event.keycode:
@@ -202,9 +225,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 func _start_run() -> void:
+	session_run_count += 1
 	run_finished = false
 	current_floor = 1
 	floor_phase = "idle"
+	run_boss_reached = false
+	run_combat_floor_time_total = 0.0
+	run_combat_floor_count = 0
+	run_floor_times.clear()
+	if player and player.has_method("reset_for_new_run"):
+		player.reset_for_new_run()
 	owned_reward_ids.clear()
 	owned_tag_counts.clear()
 	owned_rescue_keys.clear()
@@ -218,9 +248,12 @@ func _start_floor(floor_number: int) -> void:
 	floor_reward_offered = false
 	reward_guaranteed_this_floor = false
 	reward_options.clear()
+	floor_reinforcement_spawned = false
 	if hud.has_method("hide_reward_options"):
 		hud.hide_reward_options()
 	var floor_data := floor_definitions[floor_number - 1]
+	current_floor_data = floor_data
+	floor_start_msec = Time.get_ticks_msec()
 	var floor_type: String = floor_data.get("type", "combat")
 	var floor_name: String = floor_data.get("name", "")
 	_update_hud_floor(floor_type, floor_name)
@@ -229,6 +262,9 @@ func _start_floor(floor_number: int) -> void:
 			_spawn_floor_enemies(floor_data.get("enemies", []))
 			floor_phase = "combat"
 			if floor_type == "boss":
+				if not run_boss_reached:
+					run_boss_reached = true
+					session_boss_reach_count += 1
 				_set_run_message("10F: 消しゴム神 出現")
 			else:
 				_set_run_message("F%d 開始" % current_floor)
@@ -310,9 +346,39 @@ func _is_combat_cleared() -> bool:
 		var enemy := node as BaseEnemy
 		if enemy and enemy.current_state != BaseEnemy.EnemyState.DEAD:
 			return false
+	if _should_spawn_reinforcement():
+		_spawn_floor_reinforcement()
+		floor_reinforcement_spawned = true
+		return false
 	return true
 
+func _should_spawn_reinforcement() -> bool:
+	if floor_reinforcement_spawned:
+		return false
+	var floor_type: String = str(current_floor_data.get("type", "combat"))
+	if floor_type != "combat":
+		return false
+	var elapsed := _current_floor_elapsed()
+	return elapsed <= REINFORCEMENT_TRIGGER_TIME
+
+func _spawn_floor_reinforcement() -> void:
+	var enemy_keys: Array = current_floor_data.get("enemies", [])
+	if enemy_keys.is_empty():
+		return
+	var reinforcement_count := 1
+	if current_floor >= 6:
+		reinforcement_count = 2
+	for i in range(reinforcement_count):
+		var key_index := randi_range(0, enemy_keys.size() - 1)
+		var key := str(enemy_keys[key_index])
+		var x := ENEMY_SPAWN_END_X + randf_range(-180.0, 180.0) + float(i) * 36.0
+		x = clampf(x, ENEMY_SPAWN_START_X, LEVEL_RIGHT - 260.0)
+		var y := ENEMY_SPAWN_Y + randf_range(-SPAWN_JITTER_Y, SPAWN_JITTER_Y)
+		_spawn_enemy_by_key(key, Vector2(x, y))
+	_set_run_message("F%d 増援出現 (短時間クリア対策)" % current_floor)
+
 func _on_floor_cleared() -> void:
+	_record_floor_time_if_needed()
 	floor_phase = "clear_wait"
 	floor_timer = FLOOR_CLEAR_DELAY
 	_set_run_message("F%d CLEAR - 報酬選択へ" % current_floor)
@@ -339,8 +405,20 @@ func _finish_run() -> void:
 	_clear_current_floor_nodes()
 	if hud.has_method("hide_reward_options"):
 		hud.hide_reward_options()
-	_set_run_message("RUN CLEAR! 10F 完走")
-	player.emit_signal("debug_log", "RUN CLEAR (Sprint 3.1達成)")
+	session_boss_clear_count += 1
+	_set_run_message("RUN CLEAR! 10F 完走 (Rで再挑戦)")
+	player.emit_signal("debug_log", "RUN CLEAR")
+	_log_kpi_summary(true)
+
+func _fail_run() -> void:
+	run_finished = true
+	floor_phase = "finished"
+	_clear_current_floor_nodes()
+	if hud.has_method("hide_reward_options"):
+		hud.hide_reward_options()
+	_set_run_message("RUN FAILED (Rで再挑戦)")
+	player.emit_signal("debug_log", "RUN FAILED at F%d" % current_floor)
+	_log_kpi_summary(false)
 
 func _should_offer_reward_for_floor() -> bool:
 	return current_floor < TOTAL_FLOORS
@@ -528,6 +606,42 @@ func _pick_rescue_reward(available: Array, options: Array[Dictionary]) -> Dictio
 	if picked.is_empty():
 		return {}
 	return picked[0]
+
+func _current_floor_elapsed() -> float:
+	if floor_start_msec <= 0:
+		return 0.0
+	return maxf(0.0, float(Time.get_ticks_msec() - floor_start_msec) / 1000.0)
+
+func _record_floor_time_if_needed() -> void:
+	var floor_type: String = str(current_floor_data.get("type", "combat"))
+	if floor_type not in ["combat", "boss"]:
+		return
+	var elapsed := _current_floor_elapsed()
+	run_floor_times[current_floor] = elapsed
+	run_combat_floor_time_total += elapsed
+	run_combat_floor_count += 1
+	session_total_combat_floor_time += elapsed
+	session_total_combat_floor_count += 1
+	floor_start_msec = 0
+
+func _log_kpi_summary(run_clear: bool) -> void:
+	var run_avg := 0.0
+	if run_combat_floor_count > 0:
+		run_avg = run_combat_floor_time_total / float(run_combat_floor_count)
+	var session_avg := 0.0
+	if session_total_combat_floor_count > 0:
+		session_avg = session_total_combat_floor_time / float(session_total_combat_floor_count)
+	var boss_reach_rate := 0.0
+	var boss_clear_rate := 0.0
+	if session_run_count > 0:
+		boss_reach_rate = 100.0 * float(session_boss_reach_count) / float(session_run_count)
+		boss_clear_rate = 100.0 * float(session_boss_clear_count) / float(session_run_count)
+	var result := "CLEAR" if run_clear else "FAIL"
+	player.emit_signal(
+		"debug_log",
+		"KPI[%s] run_avg:%.1fs session_avg:%.1fs reach:%.1f%% clear:%.1f%% target:%.0f-%.0fs"
+		% [result, run_avg, session_avg, boss_reach_rate, boss_clear_rate, TARGET_FLOOR_TIME_MIN, TARGET_FLOOR_TIME_MAX]
+	)
 
 func _clear_current_floor_nodes() -> void:
 	for node in get_tree().get_nodes_in_group("enemies"):
