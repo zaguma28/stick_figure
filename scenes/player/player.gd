@@ -49,6 +49,7 @@ var stamina: float
 var estus_charges: int
 var current_state: State = State.IDLE
 var move_axis: float = 0.0
+var virtual_move_axis: float = 0.0
 var facing_dir := Vector2.RIGHT
 
 var stamina_delay_timer: float = 0.0
@@ -114,6 +115,7 @@ func reset_for_new_run() -> void:
 	estus_charges = estus_max_charges
 	current_state = State.IDLE
 	move_axis = 0.0
+	virtual_move_axis = 0.0
 	facing_dir = Vector2.RIGHT
 	velocity = Vector2.ZERO
 	stamina_delay_timer = 0.0
@@ -159,7 +161,10 @@ func _update_timers(delta: float) -> void:
 		skill2_cd -= delta
 
 func _handle_input() -> void:
-	move_axis = Input.get_axis("move_left", "move_right")
+	var keyboard_axis := Input.get_axis("move_left", "move_right")
+	move_axis = keyboard_axis
+	if absf(virtual_move_axis) > absf(move_axis):
+		move_axis = virtual_move_axis
 	if absf(move_axis) > 0.05:
 		facing_dir = Vector2(signf(move_axis), 0.0)
 
@@ -499,6 +504,9 @@ func apply_reward(reward: Dictionary) -> void:
 			emit_signal("debug_log", "REWARD: スタミナ回復 +5/s")
 		_:
 			emit_signal("debug_log", "REWARD: %s" % reward.get("name", reward_id))
+
+func set_virtual_move_axis(axis: float) -> void:
+	virtual_move_axis = clampf(axis, -1.0, 1.0)
 
 func _can_use_stamina(cost: float) -> bool:
 	return stamina >= cost

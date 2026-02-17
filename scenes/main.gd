@@ -3,6 +3,7 @@ extends Node2D
 @onready var player = $Player
 @onready var hud = $HUD
 @onready var camera: Camera2D = $Player/Camera2D
+@onready var virtual_joystick: Control = $VirtualJoystick
 
 var enemy_scene: PackedScene = preload("res://scenes/enemies/base_enemy.tscn")
 var charger_script: GDScript = preload("res://scenes/enemies/charger.gd")
@@ -175,6 +176,8 @@ func _ready() -> void:
 	RenderingServer.set_default_clear_color(Color(0.08, 0.08, 0.12))
 	player.add_to_group("player")
 	hud.setup(player)
+	if virtual_joystick and virtual_joystick.has_signal("stick_input"):
+		virtual_joystick.stick_input.connect(_on_stick_input)
 	_build_stage()
 	_setup_camera()
 	player.position = PLAYER_START
@@ -663,6 +666,10 @@ func _set_run_message(message: String) -> void:
 	if hud.has_method("set_run_message"):
 		hud.set_run_message(message)
 	player.emit_signal("debug_log", message)
+
+func _on_stick_input(direction: Vector2) -> void:
+	if player and player.has_method("set_virtual_move_axis"):
+		player.set_virtual_move_axis(direction.x)
 
 func _build_stage() -> void:
 	if has_node("Stage"):

@@ -97,6 +97,12 @@
 - Decision: プレイヤーに `reset_for_new_run()` を追加し、再挑戦時にビルドを初期化
 - Rationale: 報酬効果が次ランへ残留するとKPIが歪むため
 
+### 2026-02-17（入力統合）
+
+- Decision: `main.tscn` に `VirtualJoystick` を常設し、`stick_input.x` を `player.gd` の移動軸へ統合
+- Rationale: TODOの「virtual_joystick とキーボード入力の統合」を解消するため
+- Notes: キーボード軸と仮想スティック軸は絶対値が大きい方を採用
+
 ---
 
 ## コリジョンレイヤー設計
@@ -116,5 +122,4 @@
 - TODO: 敵同士の衝突回避（現在は重なる）
 - TODO: 敵死亡時のSE/エフェクト
 - TODO: 本ボスの実機検証と秒刻み微調整（予兆/当たり判定/被ダメ）
-- TODO: virtual_joystickとキーボード入力の統合
 - TODO: KPI実機検証（平均35〜60秒、到達10〜25%、撃破5〜15%に収束させる）
