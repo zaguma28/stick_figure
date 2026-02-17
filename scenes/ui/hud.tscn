@@ -35,6 +35,19 @@ show_percentage = false
 layout_mode = 2
 text = "EST: 3/3"
 
+[node name="FloorLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Floor: 1/10"
+
+[node name="FloorDescLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "COMBAT | -"
+
+[node name="RunLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.9, 0.4, 1)
+text = ""
+
 [node name="StateLabel" type="Label" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
 text = "State: IDLE"

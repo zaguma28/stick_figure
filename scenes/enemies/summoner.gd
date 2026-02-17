@@ -43,6 +43,8 @@ func _summon_minions() -> void:
 		minion.contact_damage = 12
 		minion.move_speed = 130.0
 		minion.max_poise = 20.0
+		if minion.has_method("apply_floor_scaling"):
+			minion.apply_floor_scaling(floor_hp_scale, floor_damage_scale)
 		var offset := Vector2(randf_range(-40, 40), randf_range(-40, 40))
 		minion.position = global_position + offset
 		get_parent().call_deferred("add_child", minion)

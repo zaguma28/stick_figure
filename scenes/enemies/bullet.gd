@@ -6,6 +6,7 @@ var damage: int = 16
 var lifetime: float = 5.0
 
 func _ready() -> void:
+	add_to_group("enemy_projectiles")
 	body_entered.connect(_on_body_entered)
 
 func _physics_process(delta: float) -> void:

@@ -25,8 +25,17 @@ var attack_cooldown: float = 1.0
 var attack_cd_timer: float = 0.0
 var has_hit_this_attack: bool = false
 var poise_delay_timer: float = 0.0
+var floor_hp_scale: float = 1.0
+var floor_damage_scale: float = 1.0
 
 signal enemy_died(enemy: Node2D)
+
+func apply_floor_scaling(hp_scale: float, damage_scale: float) -> void:
+	floor_hp_scale = hp_scale
+	floor_damage_scale = damage_scale
+	max_hp = maxi(1, int(round(float(max_hp) * floor_hp_scale)))
+	contact_damage = maxi(1, int(round(float(contact_damage) * floor_damage_scale)))
+	hp = max_hp
 
 func _ready() -> void:
 	hp = max_hp

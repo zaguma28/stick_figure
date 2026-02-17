@@ -3,6 +3,9 @@ extends CanvasLayer
 @onready var hp_bar: ProgressBar = $MarginContainer/VBoxContainer/HPBar
 @onready var stamina_bar: ProgressBar = $MarginContainer/VBoxContainer/StaminaBar
 @onready var estus_label: Label = $MarginContainer/VBoxContainer/EstusLabel
+@onready var floor_label: Label = $MarginContainer/VBoxContainer/FloorLabel
+@onready var floor_desc_label: Label = $MarginContainer/VBoxContainer/FloorDescLabel
+@onready var run_label: Label = $MarginContainer/VBoxContainer/RunLabel
 @onready var state_label: Label = $MarginContainer/VBoxContainer/StateLabel
 @onready var debug_label: Label = $DebugContainer/DebugLabel
 
@@ -23,6 +26,15 @@ func setup(player: Node) -> void:
 	_on_hp_changed(player.hp, player.max_hp)
 	_on_stamina_changed(player.stamina, player.max_stamina)
 	_on_estus_changed(player.estus_charges, player.estus_max_charges)
+	set_floor_info(1, 10, "COMBAT", "Initializing")
+	set_run_message("")
+
+func set_floor_info(current: int, total: int, floor_type: String, floor_name: String) -> void:
+	floor_label.text = "Floor: %d/%d" % [current, total]
+	floor_desc_label.text = "%s | %s" % [floor_type, floor_name]
+
+func set_run_message(message: String) -> void:
+	run_label.text = message
 
 func _on_hp_changed(current: int, maximum: int) -> void:
 	hp_bar.max_value = maximum
