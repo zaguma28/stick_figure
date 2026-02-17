@@ -391,6 +391,19 @@ func take_damage(amount: int, _poise_damage: int = 0, source: Node = null) -> vo
 	emit_signal("hp_changed", hp, max_hp)
 	emit_signal("stamina_changed", stamina, max_stamina)
 
+func take_hazard_damage(amount: int, source: Node = null) -> void:
+	if iframes_timer > 0:
+		return
+	var previous_hp := hp
+	hp = maxi(0, hp - amount)
+	if hp < previous_hp:
+		iframes_timer = maxf(iframes_timer, 0.08)
+		var src_name := "HAZARD"
+		if source:
+			src_name = source.name
+		emit_signal("debug_log", "%s -%d HP (ガード不可)" % [src_name, amount])
+	emit_signal("hp_changed", hp, max_hp)
+
 func _check_attack_hits() -> void:
 	var atk_range := 0.0
 	var dmg := 0
@@ -431,7 +444,7 @@ func _check_attack_hits() -> void:
 				continue
 
 		attack_hit_ids.append(enemy.get_instance_id())
-		var kb_dir := Vector2(signf(dx), -0.12)
+		var kb_dir := Vector2(signf(dx), 0.0)
 		if kb_dir.x == 0.0:
 			kb_dir.x = signf(forward)
 		enemy.take_damage(scaled_dmg, poise_dmg, kb_dir.normalized())
@@ -536,53 +549,68 @@ func _update_visuals() -> void:
 	queue_redraw()
 
 func _draw() -> void:
-	var body_color := Color(0.85, 0.9, 1.0)
+	var body_color := Color(0.78, 0.9, 1.0)
 	match current_state:
 		State.ROLL:
-			body_color = Color(0.45, 0.8, 1.0, 0.7)
+			body_color = Color(0.36, 0.78, 1.0, 0.78)
 		State.GUARD:
-			body_color = Color(0.45, 1.0, 0.45)
+			body_color = Color(0.42, 1.0, 0.56)
 		State.PARRY:
-			body_color = Color(1.0, 0.98, 0.35)
+			body_color = Color(1.0, 0.95, 0.3)
 		State.PARRY_FAIL:
-			body_color = Color(1.0, 0.45, 0.2)
+			body_color = Color(1.0, 0.42, 0.18)
 		State.ATTACK_1, State.ATTACK_2, State.ATTACK_3:
-			body_color = Color(1.0, 0.72, 0.28)
+			body_color = Color(1.0, 0.72, 0.26)
 		State.ESTUS:
-			body_color = Color(0.26, 1.0, 0.62)
+			body_color = Color(0.24, 1.0, 0.66)
 		State.STAGGER:
 			body_color = Color(1.0, 0.2, 0.2)
 		State.SKILL_1, State.SKILL_2:
-			body_color = Color(0.76, 0.48, 1.0)
+			body_color = Color(0.72, 0.42, 1.0)
 
 	var facing := 1.0 if facing_dir.x >= 0.0 else -1.0
 	var step := 0.0
 	if current_state == State.MOVE and is_on_floor():
-		step = sin(float(Time.get_ticks_msec()) * 0.018) * 4.0
+		step = sin(float(Time.get_ticks_msec()) * 0.02) * 3.2
 
-	draw_circle(Vector2(0, 20), 12.0, Color(0.0, 0.0, 0.0, 0.2))
+	draw_circle(Vector2(0, 14), 8.0, Color(0.0, 0.0, 0.0, 0.2))
 
-	var hip := Vector2(0, 8)
-	var left_foot := Vector2(-7.0 + step, 26.0)
-	var right_foot := Vector2(7.0 - step, 26.0)
-	draw_line(hip, left_foot, body_color.darkened(0.2), 3.0)
-	draw_line(hip, right_foot, body_color.darkened(0.05), 3.0)
+	var head := Vector2(0, -16)
+	var neck := Vector2(0, -9)
+	var pelvis := Vector2(0, 3)
+	var lead_knee := Vector2(4.4 * facing, 9.0 + step * 0.2)
+	var rear_knee := Vector2(-3.9 * facing, 8.0 - step * 0.2)
+	var lead_foot := Vector2(6.2 * facing + step, 16.0)
+	var rear_foot := Vector2(-5.8 * facing - step * 0.7, 15.0)
+	var lead_arm := Vector2(7.6 * facing, -2.2 + step * 0.28)
+	var rear_arm := Vector2(-7.0 * facing, -2.8 - step * 0.24)
 
-	draw_rect(Rect2(-8.0, -20.0, 16.0, 28.0), body_color)
-	draw_circle(Vector2(0, -30), 9.0, body_color)
-	draw_circle(Vector2(3.0 * facing, -31), 1.2, Color(0.08, 0.08, 0.1))
+	draw_line(neck, pelvis, body_color, 2.6)
+	draw_line(neck, lead_arm, body_color.darkened(0.08), 2.2)
+	draw_line(neck, rear_arm, body_color.darkened(0.22), 2.1)
+	draw_line(pelvis, lead_knee, body_color.darkened(0.08), 2.25)
+	draw_line(lead_knee, lead_foot, body_color.darkened(0.08), 2.1)
+	draw_line(pelvis, rear_knee, body_color.darkened(0.22), 2.2)
+	draw_line(rear_knee, rear_foot, body_color.darkened(0.22), 2.0)
+	draw_circle(head, 5.2, body_color.lightened(0.05))
+	draw_circle(head + Vector2(2.0 * facing, -0.7), 0.95, Color(0.08, 0.08, 0.1))
 
-	var shoulder := Vector2(0, -12)
-	var lead_arm := Vector2(12.0 * facing, -8.0 + step * 0.3)
-	var rear_arm := Vector2(-9.0 * facing, -10.0 - step * 0.2)
-	draw_line(shoulder, lead_arm, body_color.darkened(0.1), 3.0)
-	draw_line(shoulder, rear_arm, body_color.darkened(0.25), 3.0)
+	if current_state in [State.SKILL_1, State.SKILL_2]:
+		draw_arc(Vector2.ZERO, 17.0, 0.0, TAU, 36, Color(0.72, 0.44, 1.0, 0.33), 1.6)
 
 	if current_state in [State.ATTACK_1, State.ATTACK_2, State.ATTACK_3]:
-		var slash_pos := Vector2(24.0 * facing, -10.0)
-		var start_angle := -PI * 0.35 if facing > 0.0 else PI * 0.65
-		draw_arc(slash_pos, 20.0, start_angle, start_angle + PI * 0.7, 16, Color(1, 1, 1, 0.6), 2.5)
+		var slash_pos := Vector2(15.0 * facing, -7.0)
+		var start_angle := -PI * 0.33 if facing > 0.0 else PI * 0.67
+		draw_arc(slash_pos, 14.0, start_angle, start_angle + PI * 0.72, 18, Color(0.95, 1.0, 1.0, 0.68), 2.0)
+		draw_arc(slash_pos, 18.0, start_angle + 0.08, start_angle + PI * 0.64, 18, Color(0.55, 0.86, 1.0, 0.32), 1.4)
 
 	if current_state == State.GUARD:
-		var shield_rect := Rect2(12.0 * facing - (14.0 if facing < 0.0 else 0.0), -18.0, 14.0, 24.0)
-		draw_rect(shield_rect, Color(0.35, 0.9, 0.45, 0.8))
+		var guard_pos := Vector2(8.5 * facing, -5.0)
+		var guard_perp := Vector2(-facing, 0.0)
+		draw_line(
+			guard_pos + guard_perp * 2.0 + Vector2(0.0, -7.0),
+			guard_pos + guard_perp * 2.0 + Vector2(0.0, 8.0),
+			Color(0.36, 1.0, 0.54, 0.9),
+			2.6
+		)
+		draw_arc(guard_pos + guard_perp * 2.0, 8.0, -PI * 0.45, PI * 0.45, 14, Color(0.36, 1.0, 0.54, 0.45), 1.8)

@@ -34,6 +34,9 @@ const REWARD_CHOICE_COUNT := 3
 const TARGET_FLOOR_TIME_MIN := 35.0
 const TARGET_FLOOR_TIME_MAX := 60.0
 const REINFORCEMENT_TRIGGER_TIME := 28.0
+const KPI_HP_ADJUST_STEP := 0.05
+const KPI_DMG_ADJUST_STEP := 0.04
+const KPI_REINFORCE_TIME_STEP := 2.0
 
 const REWARD_POOL := [
 	{
@@ -170,12 +173,18 @@ var session_boss_reach_count: int = 0
 var session_boss_clear_count: int = 0
 var session_total_combat_floor_time: float = 0.0
 var session_total_combat_floor_count: int = 0
+var session_enemy_hp_multiplier: float = 1.0
+var session_enemy_damage_multiplier: float = 1.0
+var session_reinforcement_trigger_time: float = REINFORCEMENT_TRIGGER_TIME
+var session_extra_reinforcement_count: int = 0
 
 func _ready() -> void:
 	randomize()
 	RenderingServer.set_default_clear_color(Color(0.08, 0.08, 0.12))
 	player.add_to_group("player")
 	hud.setup(player)
+	if hud and hud.has_signal("reward_selected"):
+		hud.reward_selected.connect(_on_reward_selected)
 	if virtual_joystick and virtual_joystick.has_signal("stick_input"):
 		virtual_joystick.stick_input.connect(_on_stick_input)
 	_build_stage()
@@ -330,8 +339,8 @@ func _apply_floor_scaling(node: Node) -> void:
 	var enemy := node as BaseEnemy
 	if not enemy:
 		return
-	var hp_scale := 1.0 + 0.08 * float(current_floor - 1)
-	var dmg_scale := 1.0 + 0.06 * float(current_floor - 1)
+	var hp_scale := (1.0 + 0.08 * float(current_floor - 1)) * session_enemy_hp_multiplier
+	var dmg_scale := (1.0 + 0.06 * float(current_floor - 1)) * session_enemy_damage_multiplier
 	if enemy.has_method("apply_floor_scaling"):
 		enemy.call_deferred("apply_floor_scaling", hp_scale, dmg_scale)
 
@@ -362,7 +371,7 @@ func _should_spawn_reinforcement() -> bool:
 	if floor_type != "combat":
 		return false
 	var elapsed := _current_floor_elapsed()
-	return elapsed <= REINFORCEMENT_TRIGGER_TIME
+	return elapsed <= session_reinforcement_trigger_time
 
 func _spawn_floor_reinforcement() -> void:
 	var enemy_keys: Array = current_floor_data.get("enemies", [])
@@ -371,6 +380,8 @@ func _spawn_floor_reinforcement() -> void:
 	var reinforcement_count := 1
 	if current_floor >= 6:
 		reinforcement_count = 2
+	reinforcement_count += session_extra_reinforcement_count
+	reinforcement_count = mini(reinforcement_count, 4)
 	for i in range(reinforcement_count):
 		var key_index := randi_range(0, enemy_keys.size() - 1)
 		var key := str(enemy_keys[key_index])
@@ -645,6 +656,62 @@ func _log_kpi_summary(run_clear: bool) -> void:
 		"KPI[%s] run_avg:%.1fs session_avg:%.1fs reach:%.1f%% clear:%.1f%% target:%.0f-%.0fs"
 		% [result, run_avg, session_avg, boss_reach_rate, boss_clear_rate, TARGET_FLOOR_TIME_MIN, TARGET_FLOOR_TIME_MAX]
 	)
+	_adjust_session_balance(run_avg, boss_reach_rate, boss_clear_rate)
+
+func _adjust_session_balance(run_avg: float, boss_reach_rate: float, boss_clear_rate: float) -> void:
+	if session_run_count < 2:
+		return
+
+	var harden := 0
+	var ease := 0
+	if run_avg > 0.0:
+		if run_avg < TARGET_FLOOR_TIME_MIN:
+			harden += 1
+		elif run_avg > TARGET_FLOOR_TIME_MAX:
+			ease += 1
+	if boss_reach_rate > 25.0:
+		harden += 1
+	elif session_run_count >= 3 and boss_reach_rate < 10.0:
+		ease += 1
+	if boss_clear_rate > 15.0:
+		harden += 1
+	elif session_run_count >= 3 and boss_clear_rate < 5.0:
+		ease += 1
+
+	var delta := harden - ease
+	if delta == 0:
+		return
+
+	session_enemy_hp_multiplier = clampf(
+		session_enemy_hp_multiplier + KPI_HP_ADJUST_STEP * float(delta),
+		0.85,
+		1.35
+	)
+	session_enemy_damage_multiplier = clampf(
+		session_enemy_damage_multiplier + KPI_DMG_ADJUST_STEP * float(delta),
+		0.88,
+		1.30
+	)
+	session_reinforcement_trigger_time = clampf(
+		session_reinforcement_trigger_time + KPI_REINFORCE_TIME_STEP * float(delta),
+		18.0,
+		40.0
+	)
+	if delta > 0:
+		session_extra_reinforcement_count = mini(2, session_extra_reinforcement_count + 1)
+	else:
+		session_extra_reinforcement_count = maxi(0, session_extra_reinforcement_count - 1)
+
+	player.emit_signal(
+		"debug_log",
+		"BALANCE-> HPx%.2f DMGx%.2f RFTime:%.1f Extra:+%d"
+		% [
+			session_enemy_hp_multiplier,
+			session_enemy_damage_multiplier,
+			session_reinforcement_trigger_time,
+			session_extra_reinforcement_count
+		]
+	)
 
 func _clear_current_floor_nodes() -> void:
 	for node in get_tree().get_nodes_in_group("enemies"):
@@ -670,6 +737,11 @@ func _set_run_message(message: String) -> void:
 func _on_stick_input(direction: Vector2) -> void:
 	if player and player.has_method("set_virtual_move_axis"):
 		player.set_virtual_move_axis(direction.x)
+
+func _on_reward_selected(index: int) -> void:
+	if run_finished or floor_phase != "reward_select":
+		return
+	_select_reward(index)
 
 func _build_stage() -> void:
 	if has_node("Stage"):

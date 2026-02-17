@@ -18,16 +18,16 @@ const PHASE_PATTERNS := {
 	],
 	2: [
 		{"time": 0.0, "name": "弾幕リング", "type": "ring_shot", "telegraph": 0.55, "duration": 0.45, "count": 12, "damage": 14, "speed": 300.0},
-		{"time": 3.2, "name": "安全地帯スライド", "type": "safe_slide", "telegraph": 0.4, "duration": 1.0, "damage": 10},
+		{"time": 3.2, "name": "安全地帯スライド", "type": "safe_slide", "telegraph": 0.4, "duration": 1.35, "damage": 10, "field_duration": 2.8, "safe_half": 105.0},
 		{"time": 7.0, "name": "追跡小弾", "type": "tracking_burst", "telegraph": 0.2, "duration": 1.25, "count": 5, "damage": 14, "speed": 360.0, "interval": 0.22},
 		{"time": 10.5, "name": "押しつぶし中", "type": "crush_mid", "telegraph": 0.75, "duration": 0.75, "radius": 132.0, "damage": 28},
 		{"time": 14.5, "name": "突進2連", "type": "dash_combo", "telegraph": 0.65, "duration": 1.35, "damage": 34, "dashes": 2, "dash_distance": 230.0, "dash_interval": 0.42}
 	],
 	3: [
-		{"time": 0.0, "name": "危険弾バースト", "type": "danger_burst", "telegraph": 0.35, "duration": 0.45, "count": 6, "damage": 38, "speed": 440.0, "spread": 0.52},
+		{"time": 0.0, "name": "危険弾バースト", "type": "danger_burst", "telegraph": 0.35, "duration": 0.45, "count": 6, "damage": 38, "speed": 430.0, "spread": 0.5},
 		{"time": 3.4, "name": "斬上→叩き", "type": "slash_smash", "telegraph": 0.4, "duration": 0.95, "slash_range": 92.0, "slash_damage": 28, "smash_radius": 155.0, "smash_damage": 50},
 		{"time": 7.8, "name": "突進3連", "type": "dash_combo", "telegraph": 0.55, "duration": 1.75, "damage": 34, "dashes": 3, "dash_distance": 240.0, "dash_interval": 0.36},
-		{"time": 12.0, "name": "全消し（大技）", "type": "erase_rain", "telegraph": 0.9, "duration": 4.0, "rain_damage": 14, "interval": 0.18},
+		{"time": 12.0, "name": "全消し（大技）", "type": "erase_rain", "telegraph": 0.9, "duration": 4.0, "rain_damage": 14, "interval": 0.18, "field_damage": 12, "safe_half": 140.0},
 		{"time": 18.0, "name": "休止", "type": "rest", "telegraph": 0.0, "duration": 1.6}
 	]
 }
@@ -40,6 +40,7 @@ var action_timer: float = 0.0
 var action_step: int = 0
 var telegraph_radius: float = 140.0
 var telegraph_color: Color = Color(1.0, 0.86, 0.25, 0.35)
+var floor_hazards: Array[Dictionary] = []
 
 func _ready() -> void:
 	max_hp = 1250
@@ -64,6 +65,7 @@ func _update_state(delta: float) -> void:
 		return
 
 	_update_phase_by_hp()
+	_update_floor_hazards(delta)
 
 	match current_state:
 		EnemyState.DOWN:
@@ -137,7 +139,7 @@ func _set_telegraph_visual(action_type: String) -> void:
 			telegraph_color = Color(1.0, 0.9, 0.2, 0.34)
 		"crush_small", "crush_mid", "safe_slide":
 			telegraph_radius = 150.0
-			telegraph_color = Color(1.0, 0.58, 0.2, 0.34)
+			telegraph_color = Color(1.0, 0.62, 0.2, 0.36)
 		_:
 			telegraph_radius = 135.0
 			telegraph_color = Color(1.0, 0.85, 0.3, 0.32)
@@ -165,12 +167,23 @@ func _start_action() -> void:
 			)
 		"safe_slide":
 			_spawn_slide_wave(int(current_action.get("damage", 10)))
+			_spawn_safe_slide_hazard(
+				int(current_action.get("damage", 10)),
+				float(current_action.get("field_duration", 2.8)),
+				float(current_action.get("safe_half", 105.0))
+			)
 		"danger_burst":
 			_fire_aimed_burst(
 				int(current_action.get("count", 6)),
 				float(current_action.get("spread", 0.5)),
 				int(current_action.get("damage", 38)),
 				float(current_action.get("speed", 440.0))
+			)
+		"erase_rain":
+			_spawn_erase_field_hazard(
+				int(current_action.get("field_damage", 12)),
+				float(current_action.get("duration", 4.0)),
+				float(current_action.get("safe_half", 140.0))
 			)
 		"rest":
 			velocity.x = 0.0
@@ -181,7 +194,7 @@ func _process_action(delta: float) -> void:
 	match action_type:
 		"slash":
 			if action_step == 0 and action_timer >= 0.08:
-				_try_melee_hit(float(current_action.get("range", 86.0)), int(current_action.get("damage", 28)))
+				_try_melee_hit(float(current_action.get("range", 86.0)), int(current_action.get("damage", 28)), true)
 				action_step = 1
 		"crush_small", "crush_mid":
 			if action_step == 0 and action_timer >= 0.16:
@@ -209,7 +222,11 @@ func _process_action(delta: float) -> void:
 				action_step += 1
 		"slash_smash":
 			if action_step == 0 and action_timer >= 0.12:
-				_try_melee_hit(float(current_action.get("slash_range", 90.0)), int(current_action.get("slash_damage", 28)))
+				_try_melee_hit(
+					float(current_action.get("slash_range", 90.0)),
+					int(current_action.get("slash_damage", 28)),
+					true
+				)
 				action_step = 1
 			if action_step == 1 and action_timer >= 0.58:
 				_aoe_hit(float(current_action.get("smash_radius", 150.0)), int(current_action.get("smash_damage", 50)))
@@ -230,11 +247,13 @@ func _end_action() -> void:
 	action_step = 0
 	velocity.x = move_toward(velocity.x, 0.0, 900.0)
 
-func _try_melee_hit(hit_range: float, damage: int) -> void:
+func _try_melee_hit(hit_range: float, damage: int, front_only: bool = false) -> void:
 	if not target:
 		return
 	var dx := target.global_position.x - global_position.x
 	var dy := absf(target.global_position.y - global_position.y)
+	if front_only and signf(dx) != signf(facing_dir.x) and absf(dx) > 6.0:
+		return
 	if absf(dx) <= hit_range and dy <= engagement_height:
 		_deal_damage_to_player(damage)
 
@@ -275,9 +294,7 @@ func _fire_tracking_shot(damage: int, speed: float) -> void:
 	_spawn_bullet(dir, damage, speed)
 
 func _spawn_slide_wave(damage: int) -> void:
-	_fire_ring(10, damage, 230.0, PI * 0.1)
-	if target and absf(target.global_position.x - global_position.x) < 240.0 and absf(target.global_position.y - global_position.y) < 88.0:
-		_deal_damage_to_player(damage)
+	_fire_ring(8, damage, 230.0, PI * 0.14)
 
 func _spawn_rain_bullet(damage: int) -> void:
 	var center_x := global_position.x
@@ -306,6 +323,82 @@ func _get_aim_direction() -> Vector2:
 	var dir_x := 1.0 if facing_dir.x >= 0.0 else -1.0
 	return Vector2(dir_x, 0.0)
 
+func _spawn_safe_slide_hazard(damage: int, hazard_duration: float, safe_half_width: float) -> void:
+	if not target:
+		return
+	var safe_center := target.global_position.x + randf_range(-80.0, 80.0)
+	floor_hazards.append(
+		{
+			"type": "safe_slide",
+			"damage": damage,
+			"duration": maxf(0.6, hazard_duration),
+			"tick_interval": 0.5,
+			"tick_timer": 0.22,
+			"safe_center_x": safe_center,
+			"safe_half_width": maxf(70.0, safe_half_width),
+			"visual_height": 170.0,
+			"color": Color(1.0, 0.55, 0.22, 0.26)
+		}
+	)
+	_broadcast_to_player("BOSS: 安全地帯へ移動")
+
+func _spawn_erase_field_hazard(damage: int, hazard_duration: float, safe_half_width: float) -> void:
+	if not target:
+		return
+	var offset := 280.0 if randf() < 0.5 else -280.0
+	var safe_center := target.global_position.x + offset
+	floor_hazards.append(
+		{
+			"type": "erase_field",
+			"damage": damage,
+			"duration": maxf(1.0, hazard_duration),
+			"tick_interval": 0.4,
+			"tick_timer": 0.2,
+			"safe_center_x": safe_center,
+			"safe_half_width": maxf(110.0, safe_half_width),
+			"visual_height": 190.0,
+			"color": Color(1.0, 0.16, 0.16, 0.28)
+		}
+	)
+	_broadcast_to_player("BOSS: 全消し - 安全地帯へ")
+
+func _update_floor_hazards(delta: float) -> void:
+	if floor_hazards.is_empty():
+		return
+	var remove_indices: Array[int] = []
+	for i in range(floor_hazards.size()):
+		var hazard: Dictionary = floor_hazards[i]
+		var remaining := float(hazard.get("duration", 0.0)) - delta
+		hazard["duration"] = remaining
+		var tick_timer := float(hazard.get("tick_timer", 0.0)) - delta
+		if tick_timer <= 0.0:
+			var tick_interval := maxf(0.1, float(hazard.get("tick_interval", 0.4)))
+			tick_timer += tick_interval
+			_apply_hazard_tick(hazard)
+		hazard["tick_timer"] = tick_timer
+		floor_hazards[i] = hazard
+		if remaining <= 0.0:
+			remove_indices.push_front(i)
+	for idx in remove_indices:
+		floor_hazards.remove_at(idx)
+
+func _apply_hazard_tick(hazard: Dictionary) -> void:
+	if not target:
+		return
+	var safe_center := float(hazard.get("safe_center_x", global_position.x))
+	var safe_half := float(hazard.get("safe_half_width", 120.0))
+	var px := target.global_position.x
+	if absf(px - safe_center) > safe_half:
+		_deal_unblockable_damage(int(hazard.get("damage", 10)))
+
+func _deal_unblockable_damage(amount: int) -> void:
+	if not target:
+		return
+	if target.has_method("take_hazard_damage"):
+		target.take_hazard_damage(amount, self)
+	else:
+		_deal_damage_to_player(amount)
+
 func _update_phase_by_hp() -> void:
 	if max_hp <= 0:
 		return
@@ -333,8 +426,36 @@ func _broadcast_to_player(message: String) -> void:
 	if target and target.has_signal("debug_log"):
 		target.emit_signal("debug_log", message)
 
+func _draw_floor_hazards() -> void:
+	for hazard in floor_hazards:
+		var safe_center_local := float(hazard.get("safe_center_x", global_position.x)) - global_position.x
+		var safe_half := float(hazard.get("safe_half_width", 120.0))
+		var visual_h := float(hazard.get("visual_height", 180.0))
+		var color := hazard.get("color", Color(1.0, 0.2, 0.2, 0.24))
+		var field_half := 520.0
+		var left_w := maxf(0.0, safe_center_local - safe_half + field_half)
+		var right_x := safe_center_local + safe_half
+		var right_w := maxf(0.0, field_half - right_x)
+		if left_w > 0.0:
+			draw_rect(Rect2(-field_half, -visual_h * 0.5, left_w, visual_h), color)
+		if right_w > 0.0:
+			draw_rect(Rect2(right_x, -visual_h * 0.5, right_w, visual_h), color)
+		draw_line(
+			Vector2(safe_center_local - safe_half, -visual_h * 0.54),
+			Vector2(safe_center_local - safe_half, visual_h * 0.54),
+			Color(0.98, 0.95, 0.92, 0.35),
+			1.3
+		)
+		draw_line(
+			Vector2(safe_center_local + safe_half, -visual_h * 0.54),
+			Vector2(safe_center_local + safe_half, visual_h * 0.54),
+			Color(0.98, 0.95, 0.92, 0.35),
+			1.3
+		)
+
 func _draw() -> void:
 	super()
+	_draw_floor_hazards()
 	var phase_color := Color(0.95, 0.8, 0.3, 0.85)
 	if phase_index == 2:
 		phase_color = Color(1.0, 0.55, 0.25, 0.9)

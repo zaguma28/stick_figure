@@ -15,9 +15,19 @@ extends CanvasLayer
 @onready var reward_option_1: Label = $RewardPanel/VBoxContainer/RewardOption1
 @onready var reward_option_2: Label = $RewardPanel/VBoxContainer/RewardOption2
 @onready var reward_option_3: Label = $RewardPanel/VBoxContainer/RewardOption3
+@onready var reward_pick_1: Button = $RewardPanel/VBoxContainer/RewardButtons/Pick1Button
+@onready var reward_pick_2: Button = $RewardPanel/VBoxContainer/RewardButtons/Pick2Button
+@onready var reward_pick_3: Button = $RewardPanel/VBoxContainer/RewardButtons/Pick3Button
 
 var debug_lines: Array[String] = []
 const MAX_DEBUG_LINES := 8
+
+signal reward_selected(index: int)
+
+func _ready() -> void:
+	var buttons := [reward_pick_1, reward_pick_2, reward_pick_3]
+	for i in range(buttons.size()):
+		buttons[i].pressed.connect(_on_reward_pick_pressed.bind(i))
 
 func setup(player: Node) -> void:
 	if player.has_signal("hp_changed"):
@@ -61,16 +71,23 @@ func show_reward_options(floor_index: int, options: Array[Dictionary], guarantee
 	if guaranteed:
 		title += "（9F救済）"
 	reward_title_label.text = title
-	reward_hint_label.text = "1/2/3キーで選択"
+	reward_hint_label.text = "1/2/3キー or タップで選択"
 	var labels := [reward_option_1, reward_option_2, reward_option_3]
+	var buttons := [reward_pick_1, reward_pick_2, reward_pick_3]
 	for i in range(labels.size()):
 		var text := "[%d] ---" % (i + 1)
 		if i < options.size():
 			text = _format_reward_option(i + 1, options[i])
 		labels[i].text = text
+		var available := i < options.size()
+		buttons[i].disabled = not available
+		buttons[i].text = "選択 %d" % (i + 1)
 
 func hide_reward_options() -> void:
 	reward_panel.visible = false
+	reward_pick_1.disabled = true
+	reward_pick_2.disabled = true
+	reward_pick_3.disabled = true
 
 func _format_reward_option(index: int, reward: Dictionary) -> String:
 	var name := str(reward.get("name", "UNKNOWN"))
@@ -102,3 +119,6 @@ func _process(_delta: float) -> void:
 		var idx: int = player.current_state
 		if idx >= 0 and idx < state_names.size():
 			state_label.text = "State: %s | Pos: (%.0f, %.0f)" % [state_names[idx], player.position.x, player.position.y]
+
+func _on_reward_pick_pressed(index: int) -> void:
+	emit_signal("reward_selected", index)
