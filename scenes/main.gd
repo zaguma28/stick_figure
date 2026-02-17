@@ -15,8 +15,17 @@ var summoner_script: GDScript = preload("res://scenes/enemies/summoner.gd")
 const TOTAL_FLOORS := 10
 const FLOOR_CLEAR_DELAY := 1.2
 const EVENT_FLOOR_DURATION := 2.2
-const FLOOR_CENTER := Vector2(360, 640)
-const FLOOR_RADIUS := 280.0
+const LEVEL_LEFT := -220.0
+const LEVEL_RIGHT := 3600.0
+const LEVEL_TOP := 60.0
+const LEVEL_BOTTOM := 760.0
+const GROUND_Y := 620.0
+const PLAYER_START := Vector2(180, 500)
+const ENEMY_SPAWN_START_X := 860.0
+const ENEMY_SPAWN_END_X := 2100.0
+const ENEMY_SPAWN_Y := 470.0
+const SPAWN_JITTER_X := 120.0
+const SPAWN_JITTER_Y := 18.0
 
 var floor_definitions: Array[Dictionary] = [
 	{
@@ -78,7 +87,10 @@ func _ready() -> void:
 	RenderingServer.set_default_clear_color(Color(0.08, 0.08, 0.12))
 	player.add_to_group("player")
 	hud.setup(player)
-	player.position = FLOOR_CENTER
+	_build_stage()
+	_setup_camera()
+	player.position = PLAYER_START
+	player.velocity = Vector2.ZERO
 	queue_redraw()
 	_start_run()
 
@@ -102,7 +114,8 @@ func _start_run() -> void:
 
 func _start_floor(floor_number: int) -> void:
 	_clear_current_floor_nodes()
-	player.position = FLOOR_CENTER
+	player.position = PLAYER_START
+	player.velocity = Vector2.ZERO
 	var floor_data := floor_definitions[floor_number - 1]
 	var floor_type: String = floor_data.get("type", "combat")
 	var floor_name: String = floor_data.get("name", "")
@@ -129,12 +142,16 @@ func _spawn_floor_enemies(enemy_keys: Array) -> void:
 	var count := enemy_keys.size()
 	if count <= 0:
 		return
+	var span_start := ENEMY_SPAWN_START_X + float(current_floor - 1) * 70.0
+	var span_end := minf(ENEMY_SPAWN_END_X + float(current_floor - 1) * 90.0, LEVEL_RIGHT - 240.0)
+	if span_end <= span_start:
+		span_end = span_start + 220.0
 	for i in range(count):
-		var angle := TAU * float(i) / float(count)
-		var pos := FLOOR_CENTER + Vector2.RIGHT.rotated(angle) * FLOOR_RADIUS
-		pos += Vector2(randf_range(-40.0, 40.0), randf_range(-40.0, 40.0))
+		var t := float(i + 1) / float(count + 1)
+		var x := lerpf(span_start, span_end, t) + randf_range(-SPAWN_JITTER_X, SPAWN_JITTER_X)
+		var y := ENEMY_SPAWN_Y + randf_range(-SPAWN_JITTER_Y, SPAWN_JITTER_Y)
 		var key: String = str(enemy_keys[i])
-		_spawn_enemy_by_key(key, pos)
+		_spawn_enemy_by_key(key, Vector2(x, y))
 
 func _spawn_enemy_by_key(enemy_key: String, pos: Vector2) -> void:
 	var script := _get_enemy_script(enemy_key)
@@ -229,13 +246,79 @@ func _set_run_message(message: String) -> void:
 		hud.set_run_message(message)
 	player.emit_signal("debug_log", message)
 
+func _build_stage() -> void:
+	if has_node("Stage"):
+		return
+	var stage := Node2D.new()
+	stage.name = "Stage"
+	add_child(stage)
+	_create_static_rect(
+		stage,
+		Vector2((LEVEL_LEFT + LEVEL_RIGHT) * 0.5, GROUND_Y + 110.0),
+		Vector2((LEVEL_RIGHT - LEVEL_LEFT) + 900.0, 220.0)
+	)
+	_create_static_rect(
+		stage,
+		Vector2(LEVEL_LEFT - 32.0, (LEVEL_TOP + LEVEL_BOTTOM) * 0.5),
+		Vector2(64.0, (LEVEL_BOTTOM - LEVEL_TOP) + 500.0)
+	)
+	_create_static_rect(
+		stage,
+		Vector2(LEVEL_RIGHT + 32.0, (LEVEL_TOP + LEVEL_BOTTOM) * 0.5),
+		Vector2(64.0, (LEVEL_BOTTOM - LEVEL_TOP) + 500.0)
+	)
+	_create_static_rect(stage, Vector2(1260.0, 470.0), Vector2(400.0, 28.0))
+	_create_static_rect(stage, Vector2(2040.0, 390.0), Vector2(280.0, 28.0))
+	_create_static_rect(stage, Vector2(2840.0, 330.0), Vector2(240.0, 28.0))
+
+func _create_static_rect(parent: Node, center: Vector2, size: Vector2) -> void:
+	var body := StaticBody2D.new()
+	body.collision_layer = 1
+	body.collision_mask = 0
+	body.position = center
+	var collision := CollisionShape2D.new()
+	var shape := RectangleShape2D.new()
+	shape.size = size
+	collision.shape = shape
+	body.add_child(collision)
+	parent.add_child(body)
+
+func _setup_camera() -> void:
+	camera.enabled = true
+	camera.limit_left = int(LEVEL_LEFT)
+	camera.limit_right = int(LEVEL_RIGHT)
+	camera.limit_top = int(LEVEL_TOP - 260.0)
+	camera.limit_bottom = int(LEVEL_BOTTOM)
+	camera.position_smoothing_enabled = true
+	camera.position_smoothing_speed = 6.0
+
 func _draw() -> void:
-	var grid_size := 80
-	var grid_range := 3000
-	var grid_color := Color(0.2, 0.2, 0.3, 0.3)
-	for x in range(-grid_range, grid_range + 1, grid_size):
-		draw_line(Vector2(x, -grid_range), Vector2(x, grid_range), grid_color, 1.0)
-	for y in range(-grid_range, grid_range + 1, grid_size):
-		draw_line(Vector2(-grid_range, y), Vector2(grid_range, y), grid_color, 1.0)
-	draw_circle(Vector2.ZERO, 6, Color(1.0, 0.3, 0.3, 0.6))
-	draw_circle(FLOOR_CENTER, 6, Color(0.3, 0.5, 1.0, 0.6))
+	var world_width := (LEVEL_RIGHT - LEVEL_LEFT) + 1000.0
+	var world_left := LEVEL_LEFT - 500.0
+	var sky_rect := Rect2(world_left, LEVEL_TOP - 1200.0, world_width, GROUND_Y - LEVEL_TOP + 1200.0)
+	draw_rect(sky_rect, Color(0.09, 0.11, 0.16))
+	for i in range(6):
+		var y := GROUND_Y - 240.0 - float(i) * 45.0
+		var c := Color(0.14, 0.16 + 0.02 * i, 0.2 + 0.03 * i, 0.28)
+		draw_line(Vector2(world_left, y), Vector2(world_left + world_width, y), c, 2.0)
+	var ground_rect := Rect2(world_left, GROUND_Y, world_width, 420.0)
+	draw_rect(ground_rect, Color(0.18, 0.16, 0.13))
+	for x in range(int(LEVEL_LEFT), int(LEVEL_RIGHT), 160):
+		draw_line(
+			Vector2(float(x), GROUND_Y),
+			Vector2(float(x) + 80.0, GROUND_Y),
+			Color(0.25, 0.23, 0.18, 0.35),
+			2.0
+		)
+	draw_line(
+		Vector2(ENEMY_SPAWN_START_X, LEVEL_TOP),
+		Vector2(ENEMY_SPAWN_START_X, GROUND_Y),
+		Color(0.8, 0.35, 0.2, 0.12),
+		1.0
+	)
+	draw_line(
+		Vector2(ENEMY_SPAWN_END_X, LEVEL_TOP),
+		Vector2(ENEMY_SPAWN_END_X, GROUND_Y),
+		Color(0.8, 0.35, 0.2, 0.12),
+		1.0
+	)
