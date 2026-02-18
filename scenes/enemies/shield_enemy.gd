@@ -10,7 +10,7 @@ func _ready() -> void:
 func take_damage(amount: int, poise_dmg: int = 0, knockback_dir: Vector2 = Vector2.ZERO) -> void:
 	# 正面からの攻撃を80%軽減
 	if knockback_dir != Vector2.ZERO and current_state != EnemyState.DOWN:
-		var dot := facing_dir.dot(knockback_dir)
+		var dot = facing_dir.dot(knockback_dir)
 		if dot < -0.3:
 			amount = int(amount * 0.2)
 			poise_dmg = int(poise_dmg * 0.3)
@@ -20,6 +20,6 @@ func _draw() -> void:
 	super()
 	# 盾を描画（正面方向）
 	if current_state != EnemyState.DOWN and current_state != EnemyState.DEAD:
-		var shield_pos := facing_dir * 14
-		var perp := Vector2(-facing_dir.y, facing_dir.x)
+		var shield_pos = facing_dir * 14
+		var perp = Vector2(-facing_dir.y, facing_dir.x)
 		draw_line(shield_pos - perp * 10, shield_pos + perp * 10, Color(0.6, 0.8, 1.0, 0.8), 3.0)

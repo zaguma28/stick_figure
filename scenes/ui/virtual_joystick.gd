@@ -2,9 +2,9 @@ extends Control
 
 signal stick_input(direction: Vector2)
 
-var is_pressed := false
-var stick_center := Vector2.ZERO
-var current_input := Vector2.ZERO
+var is_pressed = false
+var stick_center = Vector2.ZERO
+var current_input = Vector2.ZERO
 
 @export var dead_zone: float = 10.0
 @export var max_distance: float = 64.0
@@ -36,8 +36,8 @@ func _gui_input(event: InputEvent) -> void:
 		_update_knob(event.position)
 
 func _update_knob(touch_pos: Vector2) -> void:
-	var delta_vec := touch_pos - stick_center
-	var dist := delta_vec.length()
+	var delta_vec = touch_pos - stick_center
+	var dist = delta_vec.length()
 
 	if dist < dead_zone:
 		current_input = Vector2.ZERO

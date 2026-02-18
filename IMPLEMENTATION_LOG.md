@@ -203,6 +203,108 @@
 - Rationale: 「吹っ飛びが不自然」「棒人間の図体が大きい」という違和感に直接対応するため
 - Notes: `player.tscn` / `base_enemy.tscn` のカプセル縮小、`player.gd` / `base_enemy.gd` の描画スケールを縮小
 
+### 2026-02-18（視認性とテンポの加速）
+
+- Decision: 戦闘エフェクトを視認性優先に再整理（斬撃は残しつつ薄く、重なりFXは抑制）
+- Rationale: 敵がエフェクトで隠れる問題を解消しつつ、攻撃の手応えは維持するため
+- Notes: `hit_spark_fx.gd` の粒子/前面表示を抑制、`player.gd` の斬撃トレイルはトグル化＋低アルファ
+
+- Decision: 事件フロアを「休息」と「深淵契約」の2系統へ拡張
+- Rationale: 周回中の意思決定を増やし、毎回同じ回復イベントになる単調さを減らすため
+- Notes: 4F系は回復＋エスト補充、9FはHPを払う火力契約 or 低HP時の防御契約
+
+- Decision: 通常戦闘フロアに長期戦圧縮（戦場崩壊パルス）を追加
+- Rationale: 進行テンポが落ちるケースを自動で畳み、周回速度を底上げするため
+- Notes: 一定時間経過後、通常戦闘フロアの敵へ周期ダメージ＋体幹削りを適用
+
+### 2026-02-18（連続実装: バリエーション追加）
+
+- Decision: 新敵 `hunter_drone` を追加（距離管理 + 高速2連射）
+- Rationale: 既存の近接/拡散/召喚とは異なる「中遠距離プレッシャー」を作るため
+- Notes: `hunter_drone.gd` を追加し、複数フロアの編成へ組み込み
+
+- Decision: 戦闘フロアにモディファイア（猛攻/装甲化/暴発）を導入
+- Rationale: 同じ敵編成でも毎ランの立ち回りを変え、進行の体感速度を上げるため
+- Notes: `main.gd` のフロア開始時に抽選し、HUD/開始メッセージへ表示
+
+### 2026-02-18（連続実装: 予兆とボス新行動）
+
+- Decision: `hunter_drone` に射線予兆（ライン+着弾マーカー）を追加
+- Rationale: 中遠距離敵の攻撃方向を事前に読めるようにして、回避判断の質を上げるため
+- Notes: TELEGRAPH中のみ描画し、実射方向と同期
+
+- Decision: ボスに新行動 `sniper_lance`（ロック予兆付き狙撃）を追加
+- Rationale: パターンの単調さを減らし、「構えを見て避ける」行動密度を増やすため
+- Notes: P2に編入、予兆ロック線→高速3連射+残光ラインの順で実行
+
+### 2026-02-18（連続実装: 戦闘テンポ圧縮）
+
+- Decision: 通常戦闘フロアの長期戦圧縮を3段階化（Lv1/Lv2/Lv3）し、時間経過でパルス間隔と威力を強化
+- Rationale: フロア停滞時のテンポ低下を抑え、周回速度の下振れを減らすため
+- Notes: `main.gd` の `COMBAT_STALL_*` を拡張し、38s/52s/66sで段階上昇
+
+- Decision: 通常戦闘フロアに崩壊終端（92s）を追加し、敵を強制掃討
+- Rationale: 稀なアンチスタック失敗や敵行動噛み合いで進行が止まるケースを確実に解消するため
+- Notes: bossフロアは対象外、combatフロアのみ適用
+
+### 2026-02-18（連続実装: 予兆視認性UI）
+
+- Decision: HUDに `ThreatLabel` を追加し、TELEGRAPH中の脅威をリアルタイム表示
+- Rationale: Hunter/Bossの予兆を見落としにくくし、回避判断を早めるため
+- Notes: `main.gd` で敵状態を集計し、最危険ターゲットのみ `DANGER Lv1-3` 表示
+
+- Decision: 脅威ラベルに方向マーカー（`<<` / `>>`）と近距離タグ（`[NEAR]`）を追加
+- Rationale: 画面内でどちらを優先して避けるべきかを即時判断しやすくするため
+- Notes: 戦闘フェーズ以外では自動で `Threat: -` に戻す
+
+### 2026-02-18（連続実装: 背景レイヤー刷新）
+
+- Decision: 新規 `world_backdrop.gd` を追加し、背景描画を `main.gd` から分離
+- Rationale: 進行と演出を分離して、背景の拡張をしやすくするため
+- Notes: 空/遠景遺構/霧/地面/足場の5層を描画、カメラ追従で疑似パララックス
+
+- Decision: floor種別（combat/event/boss）と mutator（猛攻/装甲化/暴発）で背景演出を可変化
+- Rationale: 周回中の見た目変化を増やし、同じフロア構成でも体感の単調さを減らすため
+- Notes: `main.gd` の `_start_floor` から `set_floor_theme()` を呼び、背景テーマを都度更新
+
+### 2026-02-18（連続実装: 背景強化2）
+
+- Decision: 背景天候を追加（雨/灰）し、フロア種別・mutatorに応じて強度を切替
+- Rationale: 戦闘の空気感と周回時の視覚差分を増やすため
+- Notes: `world_backdrop.gd` の `weather_type` / `weather_intensity` で制御
+
+- Decision: ボス専用の背景警告演出（赤脈動オーラ + 走査ライン）を追加
+- Rationale: ボス戦突入時の緊張感とフェーズ全体の視認インパクトを上げるため
+- Notes: bossフロア時のみ `draw` で有効化
+
+- Decision: 当たり判定なしの装飾オブジェクト（崩れ柱・警告看板）を配置
+- Rationale: プレイ感に影響を与えず、ステージ情報量を増やすため
+- Notes: 描画のみで実装し、衝突判定は追加しない
+
+- Decision: 背景装飾データ配列を `Array[Dictionary]` 明示型へ修正
+- Rationale: `Variant` 推論警告を警告エラー設定でも発生させないため
+- Notes: `world_backdrop.gd` の `_draw_props()` を型安全な取得へ変更
+
+### 2026-02-18（連続実装: ボス詰まり緩和）
+
+- Decision: `Boss Assist` をプレイヤー側バフだけでなく、ボス側にも直接反映
+- Rationale: 連敗時に「被弾し続けて押し切られる」状態を減らし、突破率を上げるため
+- Notes: `boss_eraser.gd` に `apply_boss_assist()` を追加し、火力/予兆/弾幕密度/ハザードtickを段階緩和
+
+- Decision: ボス戦限定 `Second Wind`（ASSIST Lv2以上で1回復帰）を追加
+- Rationale: 終盤のワンミス全損で進行が止まるケースを減らすため
+- Notes: `main.gd` の `_try_trigger_boss_second_wind()` でHP/スタミナ/短時間無敵を再付与
+
+### 2026-02-18（連続実装: 斬撃リワーク）
+
+- Decision: プレイヤー通常攻撃の斬撃描画を線弧中心から「面を持つ三日月スラッシュ」へ変更
+- Rationale: 斬撃の存在感を強め、手応えを視覚的に分かりやすくするため
+- Notes: `player.gd` に `_draw_slash_crescent()` を追加し、通常/重撃で色味と厚みを分岐
+
+- Decision: スイングFXの表示時間と多層トレイルを増強
+- Rationale: 斬り終わりの余韻を作り、攻撃モーションをスタイリッシュに見せるため
+- Notes: `swing_fx_duration` を延長し、芯線/残像/火花ラインを追加
+
 ---
 
 ## コリジョンレイヤー設計

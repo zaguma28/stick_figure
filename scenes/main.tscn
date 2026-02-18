@@ -16,6 +16,8 @@ position = Vector2(360, 640)
 [node name="HUD" parent="." instance=ExtResource("3")]
 
 [node name="VirtualJoystick" parent="." instance=ExtResource("4")]
+layout_mode = 3
+anchors_preset = 0
 offset_left = 24.0
 offset_top = 544.0
 offset_right = 184.0

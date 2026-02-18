@@ -16,8 +16,8 @@ func _execute_attack() -> void:
 	current_state = EnemyState.ATTACK
 	state_timer = attack_duration
 	if target:
-		var dx := absf(global_position.x - target.global_position.x)
-		var dy := absf(global_position.y - target.global_position.y)
+		var dx = absf(global_position.x - target.global_position.x)
+		var dy = absf(global_position.y - target.global_position.y)
 		if dx < explosion_radius and dy < 90.0:
 			_deal_damage_to_player(contact_damage)
 	_die()
@@ -25,8 +25,8 @@ func _execute_attack() -> void:
 func _draw() -> void:
 	super()
 
-	var pulse := 0.5 + 0.5 * sin(float(Time.get_ticks_msec()) * 0.03)
-	var fuse_color := Color(1.0, 0.45, 0.15)
+	var pulse = 0.5 + 0.5 * sin(float(Time.get_ticks_msec()) * 0.03)
+	var fuse_color = Color(1.0, 0.45, 0.15)
 	if current_state == EnemyState.TELEGRAPH:
 		fuse_color = Color(1.0, 0.9 * pulse, 0.1)
 

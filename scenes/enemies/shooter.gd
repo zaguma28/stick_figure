@@ -24,12 +24,12 @@ func _do_attack() -> void:
 
 func _get_shot_direction() -> Vector2:
 	if target:
-		var to_target := target.global_position - global_position
+		var to_target = target.global_position - global_position
 		if to_target.length() > 0.001:
-			var aimed := to_target.normalized()
+			var aimed = to_target.normalized()
 			aimed.y = clampf(aimed.y, -0.45, 0.35)
 			return aimed.normalized()
-	var dir_x := 1.0 if facing_dir.x >= 0.0 else -1.0
+	var dir_x = 1.0 if facing_dir.x >= 0.0 else -1.0
 	return Vector2(dir_x, 0.0)
 
 func _fire_bullet(dir: Vector2) -> void:

@@ -264,3 +264,23 @@
 |Run|Result|BossReached|RunAvg(s)|HPx|DMGx|ReinforceTime|Extra|EndReason|Floor|HP|RealTime(s)|
 |---:|---|---|---:|---:|---:|---:|---:|---|---:|---:|---:|
 |1|FAIL|NO|10.72|0.85|0.70|0.0|0|timeout|7|58|120.01|
+
+## 2026-02-18T20:27:17 KPI Autorun
+- runs: 1
+- avg_floor_time: 11.06 s
+- boss_reach_rate: 0.00%
+- boss_clear_rate: 0.00%
+- final_balance: HPx0.85 DMGx0.70 RFTime:0.0 Extra:+0
+|Run|Result|BossReached|RunAvg(s)|HPx|DMGx|ReinforceTime|Extra|EndReason|Floor|HP|RealTime(s)|
+|---:|---|---|---:|---:|---:|---:|---:|---|---:|---:|---:|
+|1|FAIL|NO|11.06|0.85|0.70|0.0|0|player_dead|7|0|60.22|
+
+## 2026-02-18T20:50:01 KPI Autorun
+- runs: 1
+- avg_floor_time: 0.00 s
+- boss_reach_rate: 0.00%
+- boss_clear_rate: 0.00%
+- final_balance: HPx0.85 DMGx0.70 RFTime:0.0 Extra:+0
+|Run|Result|BossReached|RunAvg(s)|HPx|DMGx|ReinforceTime|Extra|EndReason|Floor|HP|RealTime(s)|
+|---:|---|---|---:|---:|---:|---:|---:|---|---:|---:|---:|
+|1|FAIL|NO|0.00|0.85|0.70|0.0|0|player_dead|1|0|28.87|

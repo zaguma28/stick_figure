@@ -12,7 +12,11 @@ var spreader_script: GDScript = preload("res://scenes/enemies/spreader.gd")
 var shield_script: GDScript = preload("res://scenes/enemies/shield_enemy.gd")
 var bomber_script: GDScript = preload("res://scenes/enemies/bomber.gd")
 var summoner_script: GDScript = preload("res://scenes/enemies/summoner.gd")
+var hunter_script: GDScript = preload("res://scenes/enemies/hunter_drone.gd")
 var boss_script: GDScript = preload("res://scenes/enemies/boss_eraser.gd")
+var impact_overlay_script: GDScript = preload("res://scenes/effects/impact_overlay.gd")
+var world_backdrop_script: GDScript = preload("res://scenes/effects/world_backdrop.gd")
+const ENABLE_SCREEN_IMPACT_FX := false
 
 const TOTAL_FLOORS := 10
 const FLOOR_CLEAR_DELAY := 1.2
@@ -34,6 +38,19 @@ const REWARD_CHOICE_COUNT := 3
 const TARGET_FLOOR_TIME_MIN := 35.0
 const TARGET_FLOOR_TIME_MAX := 60.0
 const REINFORCEMENT_TRIGGER_TIME := 28.0
+const COMBAT_STALL_START_TIME := 38.0
+const COMBAT_STALL_PULSE_INTERVAL := 3.2
+const COMBAT_STALL_DAMAGE := 8
+const COMBAT_STALL_POISE_DAMAGE := 10
+const COMBAT_STALL_LEVEL2_TIME := 52.0
+const COMBAT_STALL_LEVEL3_TIME := 66.0
+const COMBAT_STALL_FORCE_END_TIME := 92.0
+const COMBAT_STALL_LEVEL2_INTERVAL := 2.2
+const COMBAT_STALL_LEVEL3_INTERVAL := 1.3
+const COMBAT_STALL_LEVEL2_DAMAGE := 14
+const COMBAT_STALL_LEVEL3_DAMAGE := 22
+const COMBAT_STALL_LEVEL2_POISE_DAMAGE := 18
+const COMBAT_STALL_LEVEL3_POISE_DAMAGE := 32
 const KPI_HP_ADJUST_STEP := 0.05
 const KPI_DMG_ADJUST_STEP := 0.04
 const KPI_REINFORCE_TIME_STEP := 2.0
@@ -47,6 +64,9 @@ const KPI_AUTORUN_DAMAGE_MULT := 2.4
 const KPI_AUTORUN_STAMINA_REGEN_BONUS := 18.0
 const RUN_PLAY_LOG_PATH := "res://RUN_PLAY_LOG.md"
 const BOSS_ASSIST_MAX_LEVEL := 3
+const BOSS_SECOND_WIND_MIN_ASSIST_LEVEL := 2
+const BOSS_SECOND_WIND_BASE_HP_RATIO := 0.32
+const BOSS_SECOND_WIND_IFRAMES := 0.9
 
 const REWARD_POOL := [
 	{
@@ -110,6 +130,24 @@ const REWARD_POOL := [
 	}
 ]
 
+const FLOOR_MUTATOR_POOL := [
+	{
+		"id": "aggressive",
+		"name": "猛攻",
+		"desc": "敵の移動速度/攻撃回転が上昇"
+	},
+	{
+		"id": "fortified",
+		"name": "装甲化",
+		"desc": "敵のHP/体幹が上昇"
+	},
+	{
+		"id": "volatile",
+		"name": "暴発",
+		"desc": "敵の火力上昇、HP低下"
+	}
+]
+
 var floor_definitions: Array[Dictionary] = [
 	{
 		"type": "combat",
@@ -118,8 +156,8 @@ var floor_definitions: Array[Dictionary] = [
 	},
 	{
 		"type": "combat",
-		"name": "Spreader x1 / Shooter x2",
-		"enemies": ["spreader", "shooter", "shooter"]
+		"name": "Spreader x1 / Shooter x1 / Hunter x1",
+		"enemies": ["spreader", "shooter", "hunter"]
 	},
 	{
 		"type": "combat",
@@ -137,18 +175,18 @@ var floor_definitions: Array[Dictionary] = [
 	},
 	{
 		"type": "combat",
-		"name": "Spreader x2 / Bomber x1",
-		"enemies": ["spreader", "spreader", "bomber"]
+		"name": "Spreader x1 / Bomber x1 / Hunter x1",
+		"enemies": ["spreader", "bomber", "hunter"]
 	},
 	{
 		"type": "combat",
-		"name": "Shield x1 / Summoner x1 / Shooter x2",
-		"enemies": ["shield", "summoner", "shooter", "shooter"]
+		"name": "Shield x1 / Summoner x1 / Shooter x1 / Hunter x1",
+		"enemies": ["shield", "summoner", "shooter", "hunter"]
 	},
 	{
 		"type": "combat",
-		"name": "Bomber x2 / Spreader x1",
-		"enemies": ["bomber", "bomber", "spreader"]
+		"name": "Bomber x1 / Spreader x1 / Hunter x1",
+		"enemies": ["bomber", "spreader", "hunter"]
 	},
 	{
 		"type": "event",
@@ -205,6 +243,13 @@ var run_start_msec: int = 0
 var run_start_datetime: String = ""
 var run_end_reason: String = ""
 var run_boss_assist_level: int = 0
+var run_boss_second_wind_used: bool = false
+var impact_overlay: CanvasLayer = null
+var world_backdrop: Node2D = null
+var floor_stall_active: bool = false
+var floor_stall_pulse_timer: float = 0.0
+var floor_stall_level: int = 0
+var current_floor_mutator: Dictionary = {}
 
 func _ready() -> void:
 	randomize()
@@ -215,6 +260,11 @@ func _ready() -> void:
 		hud.reward_selected.connect(_on_reward_selected)
 	if virtual_joystick and virtual_joystick.has_signal("stick_input"):
 		virtual_joystick.stick_input.connect(_on_stick_input)
+	if ENABLE_SCREEN_IMPACT_FX and player and player.has_signal("impact_fx_requested"):
+		player.impact_fx_requested.connect(_on_player_impact_fx_requested)
+	if ENABLE_SCREEN_IMPACT_FX:
+		_setup_impact_overlay()
+	_build_backdrop()
 	_build_stage()
 	_setup_camera()
 	player.position = PLAYER_START
@@ -226,14 +276,21 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if kpi_autorun_enabled:
 		_process_kpi_autorun(delta)
+	_update_backdrop_focus()
 
 	if run_finished:
+		_update_threat_warning()
 		return
 	if player and player.hp <= 0:
+		if _try_trigger_boss_second_wind():
+			_update_threat_warning()
+			return
+		_update_threat_warning()
 		_fail_run()
 		return
 	match floor_phase:
 		"combat":
+			_process_combat_stall(delta)
 			if _is_combat_cleared():
 				_on_floor_cleared()
 		"event_wait", "clear_wait":
@@ -243,11 +300,12 @@ func _process(delta: float) -> void:
 		"reward_select":
 			if kpi_autorun_enabled:
 				_autoplay_select_reward()
+	_update_threat_warning()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey):
 		return
-	var key_event := event as InputEventKey
+	var key_event = event as InputEventKey
 	if not key_event.pressed or key_event.echo:
 		return
 	if run_finished:
@@ -257,7 +315,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if floor_phase != "reward_select":
 		return
-	var selected := -1
+	var selected = -1
 	match key_event.keycode:
 		KEY_1, KEY_KP_1:
 			selected = 0
@@ -276,6 +334,7 @@ func _start_run() -> void:
 	run_start_datetime = Time.get_datetime_string_from_system()
 	run_end_reason = ""
 	run_boss_assist_level = 0
+	run_boss_second_wind_used = false
 	current_floor = 1
 	floor_phase = "idle"
 	run_boss_reached = false
@@ -318,18 +377,18 @@ func _prepare_player_for_kpi_autorun() -> void:
 	player.emit_signal("estus_changed", player.estus_charges, player.estus_max_charges)
 
 func _setup_kpi_autorun_from_args() -> void:
-	var args := OS.get_cmdline_user_args()
-	var target_runs := 0
-	var parsed_timescale := KPI_AUTORUN_DEFAULT_TIMESCALE
+	var args = OS.get_cmdline_user_args()
+	var target_runs = 0
+	var parsed_timescale = KPI_AUTORUN_DEFAULT_TIMESCALE
 	for arg in args:
 		if arg == "--kpi_autorun":
 			target_runs = maxi(target_runs, 20)
 		elif arg.begins_with(KPI_AUTORUN_ARG_PREFIX):
-			var text := arg.trim_prefix(KPI_AUTORUN_ARG_PREFIX)
+			var text = arg.trim_prefix(KPI_AUTORUN_ARG_PREFIX)
 			if text.is_valid_int():
 				target_runs = maxi(target_runs, maxi(0, text.to_int()))
 		elif arg.begins_with(KPI_TIMESCALE_ARG_PREFIX):
-			var scale_text := arg.trim_prefix(KPI_TIMESCALE_ARG_PREFIX)
+			var scale_text = arg.trim_prefix(KPI_TIMESCALE_ARG_PREFIX)
 			if scale_text.is_valid_float():
 				parsed_timescale = clampf(scale_text.to_float(), 1.0, 10.0)
 	if target_runs <= 0:
@@ -394,20 +453,20 @@ func _autoplay_tick_timers(delta: float) -> void:
 func _autoplay_select_reward() -> void:
 	if reward_options.is_empty():
 		return
-	var best_index := 0
-	var best_score := -99999.0
+	var best_index = 0
+	var best_score = -99999.0
 	for i in range(reward_options.size()):
-		var score := _autoplay_reward_score(reward_options[i])
+		var score = _autoplay_reward_score(reward_options[i])
 		if score > best_score:
 			best_score = score
 			best_index = i
 	_select_reward(best_index)
 
 func _autoplay_reward_score(reward: Dictionary) -> float:
-	var score := 1.0
+	var score = 1.0
 	var tags: Array = reward.get("tags", [])
 	for tag in tags:
-		var key := str(tag)
+		var key = str(tag)
 		match key:
 			"guard":
 				score += 2.4
@@ -438,16 +497,16 @@ func _autoplay_drive_player() -> void:
 		return
 	if not player.has_method("ai_attack"):
 		return
-	var enemy := _get_nearest_alive_enemy()
+	var enemy = _get_nearest_alive_enemy()
 	if not enemy:
 		player.set_virtual_move_axis(0.0)
 		player.ai_guard_end()
 		return
 
-	var floor_type := str(current_floor_data.get("type", ""))
+	var floor_type = str(current_floor_data.get("type", ""))
 	var target_x: float = enemy.global_position.x
 	var preferred_distance: float = 122.0
-	var prioritize_safe_zone := false
+	var prioritize_safe_zone = false
 	var enemy_dx: float = enemy.global_position.x - player.global_position.x
 	var enemy_abs_dx: float = absf(enemy_dx)
 	if floor_type == "boss":
@@ -472,9 +531,9 @@ func _autoplay_drive_player() -> void:
 		move_axis = -signf(nav_dx) * 0.75
 	player.set_virtual_move_axis(move_axis)
 
-	var projectile_pressure := _count_projectiles_near_player(260.0)
-	var close_projectiles := _count_projectiles_near_player(140.0)
-	var crowd_count := _count_enemies_near_player(170.0)
+	var projectile_pressure = _count_projectiles_near_player(260.0)
+	var close_projectiles = _count_projectiles_near_player(140.0)
+	var crowd_count = _count_enemies_near_player(170.0)
 
 	if player.max_hp > 0 and float(player.hp) / float(player.max_hp) <= 0.72:
 		if player.estus_charges > 0 and autoplay_estus_cd <= 0.0 and enemy_abs_dx > 96.0 and close_projectiles == 0:
@@ -524,7 +583,7 @@ func _get_nearest_alive_enemy() -> BaseEnemy:
 	var nearest: BaseEnemy = null
 	var best_dist: float = 1e20
 	for node in get_tree().get_nodes_in_group("enemies"):
-		var enemy := node as BaseEnemy
+		var enemy = node as BaseEnemy
 		if not enemy or enemy.current_state == BaseEnemy.EnemyState.DEAD:
 			continue
 		var dx: float = enemy.global_position.x - player.global_position.x
@@ -538,9 +597,9 @@ func _get_nearest_alive_enemy() -> BaseEnemy:
 func _count_projectiles_near_player(radius: float) -> int:
 	if not player:
 		return 0
-	var count := 0
+	var count = 0
 	for node in get_tree().get_nodes_in_group("enemy_projectiles"):
-		var projectile := node as Node2D
+		var projectile = node as Node2D
 		if not projectile:
 			continue
 		if projectile.global_position.distance_to(player.global_position) <= radius:
@@ -550,9 +609,9 @@ func _count_projectiles_near_player(radius: float) -> int:
 func _count_enemies_near_player(radius: float) -> int:
 	if not player:
 		return 0
-	var count := 0
+	var count = 0
 	for node in get_tree().get_nodes_in_group("enemies"):
-		var enemy := node as BaseEnemy
+		var enemy = node as BaseEnemy
 		if not enemy or enemy.current_state == BaseEnemy.EnemyState.DEAD:
 			continue
 		if enemy.global_position.distance_to(player.global_position) <= radius:
@@ -572,18 +631,33 @@ func _start_floor(floor_number: int) -> void:
 	reward_guaranteed_this_floor = false
 	reward_options.clear()
 	floor_reinforcement_spawned = false
+	floor_stall_active = false
+	floor_stall_level = 0
+	floor_stall_pulse_timer = COMBAT_STALL_PULSE_INTERVAL
+	if hud and hud.has_method("set_threat_warning"):
+		hud.set_threat_warning("", 0)
 	if hud.has_method("hide_reward_options"):
 		hud.hide_reward_options()
-	var floor_data := floor_definitions[floor_number - 1]
+	var floor_data = floor_definitions[floor_number - 1]
 	current_floor_data = floor_data
 	floor_start_msec = Time.get_ticks_msec()
 	var floor_type: String = floor_data.get("type", "combat")
 	var floor_name: String = floor_data.get("name", "")
+	current_floor_mutator = {}
+	if floor_type == "combat":
+		current_floor_mutator = _pick_floor_mutator(current_floor)
+	if world_backdrop and world_backdrop.has_method("set_floor_theme"):
+		world_backdrop.call("set_floor_theme", floor_type, floor_number, current_floor_mutator)
+	var hud_floor_name = floor_name
+	if floor_type == "combat":
+		var mut_name_for_hud = str(current_floor_mutator.get("name", ""))
+		if mut_name_for_hud != "":
+			hud_floor_name = "%s | %s" % [floor_name, mut_name_for_hud]
 	if kpi_autorun_enabled and floor_type == "boss":
 		_prepare_player_for_kpi_boss_attempt()
 	elif floor_type == "boss":
 		_prepare_player_for_boss_assist()
-	_update_hud_floor(floor_type, floor_name)
+	_update_hud_floor(floor_type, hud_floor_name)
 	match floor_type:
 		"combat", "boss":
 			_spawn_floor_enemies(floor_data.get("enemies", []))
@@ -597,12 +671,16 @@ func _start_floor(floor_number: int) -> void:
 				else:
 					_set_run_message("10F: 消しゴム神 出現")
 			else:
-				_set_run_message("F%d 開始" % current_floor)
+				var mut_name = str(current_floor_mutator.get("name", ""))
+				if mut_name == "":
+					_set_run_message("F%d 開始" % current_floor)
+				else:
+					_set_run_message("F%d 開始 [%s]" % [current_floor, mut_name])
 		"event":
-			_apply_event_floor_effect()
+			var event_label = _apply_event_floor_effect()
 			floor_phase = "event_wait"
 			floor_timer = EVENT_FLOOR_DURATION
-			_set_run_message("F%d 事件フロア: 力を整える..." % current_floor)
+			_set_run_message("F%d 事件: %s" % [current_floor, event_label])
 		_:
 			push_warning("Unknown floor type: %s" % floor_type)
 			floor_phase = "event_wait"
@@ -625,7 +703,7 @@ func _prepare_player_for_boss_assist() -> void:
 	run_boss_assist_level = clampi(session_boss_fail_streak, 0, BOSS_ASSIST_MAX_LEVEL)
 	if run_boss_assist_level <= 0:
 		return
-	var assist_f := float(run_boss_assist_level)
+	var assist_f = float(run_boss_assist_level)
 	player.estus_max_charges = mini(7, player.estus_max_charges + run_boss_assist_level)
 	player.estus_heal = mini(player.max_hp, player.estus_heal + 8 * run_boss_assist_level)
 	player.stamina_regen += 2.2 * assist_f
@@ -642,26 +720,26 @@ func _prepare_player_for_boss_assist() -> void:
 	player.emit_signal("estus_changed", player.estus_charges, player.estus_max_charges)
 
 func _spawn_floor_enemies(enemy_keys: Array) -> void:
-	var count := enemy_keys.size()
+	var count = enemy_keys.size()
 	if count <= 0:
 		return
-	var span_start := ENEMY_SPAWN_START_X + float(current_floor - 1) * 70.0
-	var span_end := minf(ENEMY_SPAWN_END_X + float(current_floor - 1) * 90.0, LEVEL_RIGHT - 240.0)
+	var span_start = ENEMY_SPAWN_START_X + float(current_floor - 1) * 70.0
+	var span_end = minf(ENEMY_SPAWN_END_X + float(current_floor - 1) * 90.0, LEVEL_RIGHT - 240.0)
 	if span_end <= span_start:
 		span_end = span_start + 220.0
 	for i in range(count):
-		var t := float(i + 1) / float(count + 1)
-		var x := lerpf(span_start, span_end, t) + randf_range(-SPAWN_JITTER_X, SPAWN_JITTER_X)
-		var y := ENEMY_SPAWN_Y + randf_range(-SPAWN_JITTER_Y, SPAWN_JITTER_Y)
+		var t = float(i + 1) / float(count + 1)
+		var x = lerpf(span_start, span_end, t) + randf_range(-SPAWN_JITTER_X, SPAWN_JITTER_X)
+		var y = ENEMY_SPAWN_Y + randf_range(-SPAWN_JITTER_Y, SPAWN_JITTER_Y)
 		var key: String = str(enemy_keys[i])
 		_spawn_enemy_by_key(key, Vector2(x, y))
 
 func _spawn_enemy_by_key(enemy_key: String, pos: Vector2) -> void:
-	var script := _get_enemy_script(enemy_key)
+	var script = _get_enemy_script(enemy_key)
 	if script == null:
 		push_warning("Invalid enemy key: %s" % enemy_key)
 		return
-	var enemy := enemy_scene.instantiate()
+	var enemy = enemy_scene.instantiate()
 	enemy.set_script(script)
 	enemy.position = pos
 	add_child(enemy)
@@ -681,40 +759,206 @@ func _get_enemy_script(enemy_key: String) -> GDScript:
 			return bomber_script
 		"summoner":
 			return summoner_script
+		"hunter":
+			return hunter_script
 		"boss":
 			return boss_script
 		_:
 			return null
 
 func _apply_floor_scaling(node: Node) -> void:
-	var enemy := node as BaseEnemy
+	var enemy = node as BaseEnemy
 	if not enemy:
 		return
-	var hp_scale := (1.0 + 0.08 * float(current_floor - 1)) * session_enemy_hp_multiplier
-	var dmg_scale := (1.0 + 0.06 * float(current_floor - 1)) * session_enemy_damage_multiplier
+	var hp_scale = (1.0 + 0.08 * float(current_floor - 1)) * session_enemy_hp_multiplier
+	var dmg_scale = (1.0 + 0.06 * float(current_floor - 1)) * session_enemy_damage_multiplier
 	if enemy.get_script() is Script:
 		var script_path: String = String((enemy.get_script() as Script).resource_path)
 		if script_path.ends_with("boss_eraser.gd"):
 			hp_scale = session_enemy_hp_multiplier
 			dmg_scale = session_enemy_damage_multiplier
 	if enemy.has_method("apply_floor_scaling"):
-		enemy.call_deferred("apply_floor_scaling", hp_scale, dmg_scale)
+		call_deferred("_apply_floor_scaling_with_mutator", enemy, hp_scale, dmg_scale)
 
-func _apply_event_floor_effect() -> void:
-	var heal_cap := 20
+func _apply_floor_scaling_with_mutator(enemy: BaseEnemy, hp_scale: float, dmg_scale: float) -> void:
+	if not enemy or not is_instance_valid(enemy):
+		return
+	enemy.apply_floor_scaling(hp_scale, dmg_scale)
+	if run_boss_assist_level > 0 and enemy.has_method("apply_boss_assist"):
+		enemy.call("apply_boss_assist", run_boss_assist_level)
+	_apply_floor_mutator(enemy)
+
+func _pick_floor_mutator(floor_number: int) -> Dictionary:
+	if floor_number <= 0 or floor_number >= TOTAL_FLOORS:
+		return {}
+	var pool: Array = FLOOR_MUTATOR_POOL.duplicate(true)
+	if floor_number <= 2:
+		for i in range(pool.size() - 1, -1, -1):
+			if str(pool[i].get("id", "")) == "fortified":
+				pool.remove_at(i)
+	if pool.is_empty():
+		return {}
+	return pool[randi_range(0, pool.size() - 1)]
+
+func _apply_floor_mutator(node: Node) -> void:
+	var enemy = node as BaseEnemy
+	if not enemy:
+		return
+	var mutator_id = str(current_floor_mutator.get("id", ""))
+	if mutator_id == "":
+		return
+	match mutator_id:
+		"aggressive":
+			enemy.move_speed *= 1.15
+			enemy.attack_cooldown = maxf(0.35, enemy.attack_cooldown * 0.82)
+		"fortified":
+			enemy.max_hp = int(round(float(enemy.max_hp) * 1.24))
+			enemy.hp = enemy.max_hp
+			enemy.max_poise *= 1.2
+			enemy.poise = enemy.max_poise
+		"volatile":
+			enemy.max_hp = maxi(1, int(round(float(enemy.max_hp) * 0.84)))
+			enemy.hp = enemy.max_hp
+			enemy.contact_damage = int(round(float(enemy.contact_damage) * 1.34))
+		_:
+			pass
+
+func _apply_event_floor_effect() -> String:
+	if current_floor == 9:
+		return _apply_abyss_contract_event()
+	return _apply_rest_event()
+
+func _apply_rest_event() -> String:
+	var heal_cap = 20
 	if kpi_autorun_enabled:
 		heal_cap = maxi(heal_cap, int(round(float(player.max_hp) * 0.4)))
-	var heal_amount := mini(heal_cap, player.max_hp - player.hp)
+	var heal_amount = mini(heal_cap, player.max_hp - player.hp)
 	player.hp += heal_amount
+	player.stamina = player.max_stamina
+	if player.estus_charges < player.estus_max_charges:
+		player.estus_charges += 1
+	player.emit_signal("hp_changed", player.hp, player.max_hp)
+	player.emit_signal("stamina_changed", player.stamina, player.max_stamina)
+	player.emit_signal("estus_changed", player.estus_charges, player.estus_max_charges)
+	player.emit_signal("debug_log", "EVENT: 休息 (HP +%d / STAMINA FULL / ESTUS +1)" % heal_amount)
+	return "休息の間（HP回復+ESTUS補充）"
+
+func _apply_abyss_contract_event() -> String:
+	var hp_ratio = 0.0
+	if player.max_hp > 0:
+		hp_ratio = float(player.hp) / float(player.max_hp)
+	if hp_ratio >= 0.45:
+		var hp_cost = maxi(1, int(round(float(player.max_hp) * 0.16)))
+		hp_cost = mini(hp_cost, maxi(0, player.hp - 1))
+		player.hp -= hp_cost
+		player.bonus_damage_multiplier *= 1.22
+		player.attack_damage[0] += 3
+		player.attack_damage[1] += 4
+		player.attack_damage[2] += 5
+		player.stamina_regen += 3.0
+		player.emit_signal("debug_log", "EVENT: 深淵契約(侵食) HP-%d / 攻撃強化" % hp_cost)
+	else:
+		var heal_amount = mini(22, player.max_hp - player.hp)
+		player.hp += heal_amount
+		player.guard_reduction = minf(0.82, player.guard_reduction + 0.12)
+		player.roll_iframes += 0.03
+		player.emit_signal("debug_log", "EVENT: 深淵契約(加護) HP+%d / 防御強化" % heal_amount)
 	player.stamina = player.max_stamina
 	player.emit_signal("hp_changed", player.hp, player.max_hp)
 	player.emit_signal("stamina_changed", player.stamina, player.max_stamina)
-	player.emit_signal("debug_log", "EVENT: HP +%d / STAMINA FULL" % heal_amount)
+	return "深淵の契約（侵食 or 加護）"
+
+func _process_combat_stall(delta: float) -> void:
+	if floor_phase != "combat":
+		return
+	var floor_type = str(current_floor_data.get("type", "combat"))
+	if floor_type != "combat":
+		return
+	var elapsed = _current_floor_elapsed()
+	var next_level = _combat_stall_level_for_elapsed(elapsed)
+	if next_level <= 0:
+		return
+	if not floor_stall_active:
+		floor_stall_active = true
+		floor_stall_level = next_level
+		floor_stall_pulse_timer = _combat_stall_interval_for_level(floor_stall_level)
+		player.emit_signal("debug_log", "SYSTEM: 戦場崩壊開始（長期戦圧縮）")
+		_set_run_message("F%d 戦場崩壊 Lv%d" % [current_floor, floor_stall_level])
+	if next_level != floor_stall_level:
+		floor_stall_level = next_level
+		floor_stall_pulse_timer = 0.0
+		player.emit_signal("debug_log", "SYSTEM: 戦場崩壊強化 Lv%d" % floor_stall_level)
+		_set_run_message("F%d 戦場崩壊 Lv%d" % [current_floor, floor_stall_level])
+	if elapsed >= COMBAT_STALL_FORCE_END_TIME:
+		_apply_combat_stall_execution()
+		return
+	floor_stall_pulse_timer -= delta
+	if floor_stall_pulse_timer > 0.0:
+		return
+	var pulse_interval = _combat_stall_interval_for_level(floor_stall_level)
+	floor_stall_pulse_timer += pulse_interval
+	_apply_combat_stall_pulse(
+		_combat_stall_damage_for_level(floor_stall_level),
+		_combat_stall_poise_damage_for_level(floor_stall_level)
+	)
+
+func _combat_stall_level_for_elapsed(elapsed: float) -> int:
+	if elapsed >= COMBAT_STALL_LEVEL3_TIME:
+		return 3
+	if elapsed >= COMBAT_STALL_LEVEL2_TIME:
+		return 2
+	if elapsed >= COMBAT_STALL_START_TIME:
+		return 1
+	return 0
+
+func _combat_stall_interval_for_level(level: int) -> float:
+	if level >= 3:
+		return COMBAT_STALL_LEVEL3_INTERVAL
+	if level >= 2:
+		return COMBAT_STALL_LEVEL2_INTERVAL
+	return COMBAT_STALL_PULSE_INTERVAL
+
+func _combat_stall_damage_for_level(level: int) -> int:
+	if level >= 3:
+		return COMBAT_STALL_LEVEL3_DAMAGE
+	if level >= 2:
+		return COMBAT_STALL_LEVEL2_DAMAGE
+	return COMBAT_STALL_DAMAGE
+
+func _combat_stall_poise_damage_for_level(level: int) -> int:
+	if level >= 3:
+		return COMBAT_STALL_LEVEL3_POISE_DAMAGE
+	if level >= 2:
+		return COMBAT_STALL_LEVEL2_POISE_DAMAGE
+	return COMBAT_STALL_POISE_DAMAGE
+
+func _apply_combat_stall_pulse(damage: int, poise_damage: int) -> void:
+	var damaged = 0
+	for node in get_tree().get_nodes_in_group("enemies"):
+		var enemy = node as BaseEnemy
+		if not enemy or enemy.current_state == BaseEnemy.EnemyState.DEAD:
+			continue
+		enemy.take_damage(damage, poise_damage, Vector2.ZERO)
+		damaged += 1
+	if damaged > 0:
+		player.emit_signal("debug_log", "SYSTEM: 崩壊パルス Lv%d x%d" % [floor_stall_level, damaged])
+
+func _apply_combat_stall_execution() -> void:
+	var executed = 0
+	for node in get_tree().get_nodes_in_group("enemies"):
+		var enemy = node as BaseEnemy
+		if not enemy or enemy.current_state == BaseEnemy.EnemyState.DEAD:
+			continue
+		enemy.take_damage(99999, 99999, Vector2.ZERO)
+		executed += 1
+	if executed > 0:
+		player.emit_signal("debug_log", "SYSTEM: 崩壊終端 x%d" % executed)
+		_set_run_message("F%d 崩壊終端: 強制掃討" % current_floor)
 
 func _is_combat_cleared() -> bool:
-	var enemies := get_tree().get_nodes_in_group("enemies")
+	var enemies = get_tree().get_nodes_in_group("enemies")
 	for node in enemies:
-		var enemy := node as BaseEnemy
+		var enemy = node as BaseEnemy
 		if enemy and enemy.current_state != BaseEnemy.EnemyState.DEAD:
 			return false
 	if _should_spawn_reinforcement():
@@ -729,24 +973,24 @@ func _should_spawn_reinforcement() -> bool:
 	var floor_type: String = str(current_floor_data.get("type", "combat"))
 	if floor_type != "combat":
 		return false
-	var elapsed := _current_floor_elapsed()
+	var elapsed = _current_floor_elapsed()
 	return elapsed <= session_reinforcement_trigger_time
 
 func _spawn_floor_reinforcement() -> void:
 	var enemy_keys: Array = current_floor_data.get("enemies", [])
 	if enemy_keys.is_empty():
 		return
-	var reinforcement_count := 1
+	var reinforcement_count = 1
 	if current_floor >= 6:
 		reinforcement_count = 2
 	reinforcement_count += session_extra_reinforcement_count
 	reinforcement_count = mini(reinforcement_count, 4)
 	for i in range(reinforcement_count):
-		var key_index := randi_range(0, enemy_keys.size() - 1)
-		var key := str(enemy_keys[key_index])
-		var x := ENEMY_SPAWN_END_X + randf_range(-180.0, 180.0) + float(i) * 36.0
+		var key_index = randi_range(0, enemy_keys.size() - 1)
+		var key = str(enemy_keys[key_index])
+		var x = ENEMY_SPAWN_END_X + randf_range(-180.0, 180.0) + float(i) * 36.0
 		x = clampf(x, ENEMY_SPAWN_START_X, LEVEL_RIGHT - 260.0)
-		var y := ENEMY_SPAWN_Y + randf_range(-SPAWN_JITTER_Y, SPAWN_JITTER_Y)
+		var y = ENEMY_SPAWN_Y + randf_range(-SPAWN_JITTER_Y, SPAWN_JITTER_Y)
 		_spawn_enemy_by_key(key, Vector2(x, y))
 	_set_run_message("F%d 増援出現 (短時間クリア対策)" % current_floor)
 
@@ -801,6 +1045,39 @@ func _fail_run() -> void:
 	player.emit_signal("debug_log", "RUN FAILED at F%d" % current_floor)
 	_log_kpi_summary(false)
 
+func _try_trigger_boss_second_wind() -> bool:
+	if run_boss_second_wind_used:
+		return false
+	if floor_phase != "combat":
+		return false
+	if str(current_floor_data.get("type", "")) != "boss":
+		return false
+	if run_boss_assist_level < BOSS_SECOND_WIND_MIN_ASSIST_LEVEL:
+		return false
+	if not player:
+		return false
+	run_boss_second_wind_used = true
+	var revive_ratio = clampf(
+		BOSS_SECOND_WIND_BASE_HP_RATIO + 0.06 * float(run_boss_assist_level - BOSS_SECOND_WIND_MIN_ASSIST_LEVEL),
+		0.28,
+		0.5
+	)
+	var revive_hp = maxi(1, int(round(float(player.max_hp) * revive_ratio)))
+	player.hp = clampi(revive_hp, 1, player.max_hp)
+	player.stamina = player.max_stamina
+	if player.estus_charges <= 0:
+		player.estus_charges = mini(player.estus_max_charges, 1)
+	player.current_state = 0
+	player.state_timer = 0.0
+	player.iframes_timer = maxf(player.iframes_timer, BOSS_SECOND_WIND_IFRAMES)
+	player.velocity = Vector2.ZERO
+	player.emit_signal("hp_changed", player.hp, player.max_hp)
+	player.emit_signal("stamina_changed", player.stamina, player.max_stamina)
+	player.emit_signal("estus_changed", player.estus_charges, player.estus_max_charges)
+	_set_run_message("BOSS SECOND WIND 発動")
+	player.emit_signal("debug_log", "SYSTEM: SECOND WIND (ASSIST Lv%d)" % run_boss_assist_level)
+	return true
+
 func _should_offer_reward_for_floor() -> bool:
 	return current_floor < TOTAL_FLOORS
 
@@ -812,7 +1089,7 @@ func _begin_reward_selection() -> void:
 		_go_to_next_floor()
 		return
 	floor_phase = "reward_select"
-	var hint := "報酬選択: 1/2/3 キー"
+	var hint = "報酬選択: 1/2/3 キー"
 	if reward_guaranteed_this_floor:
 		hint += "（9F救済候補を含む）"
 	_set_run_message(hint)
@@ -822,7 +1099,7 @@ func _begin_reward_selection() -> void:
 func _select_reward(option_index: int) -> void:
 	if option_index < 0 or option_index >= reward_options.size():
 		return
-	var reward := reward_options[option_index]
+	var reward = reward_options[option_index]
 	_apply_reward(reward)
 	if hud.has_method("hide_reward_options"):
 		hud.hide_reward_options()
@@ -835,7 +1112,7 @@ func _apply_reward(reward: Dictionary) -> void:
 		owned_reward_ids[reward_id] = true
 	var tags: Array = reward.get("tags", [])
 	for tag in tags:
-		var key := str(tag)
+		var key = str(tag)
 		owned_tag_counts[key] = int(owned_tag_counts.get(key, 0)) + 1
 	var rescue_keys: Array = reward.get("rescue_keys", [])
 	for rescue_key in rescue_keys:
@@ -848,11 +1125,11 @@ func _apply_reward(reward: Dictionary) -> void:
 
 func _generate_reward_options() -> Array[Dictionary]:
 	reward_guaranteed_this_floor = false
-	var available := _get_available_rewards()
+	var available = _get_available_rewards()
 	if available.is_empty():
 		return []
 
-	var primary_tag := _get_primary_tag()
+	var primary_tag = _get_primary_tag()
 	var options: Array[Dictionary] = []
 	if primary_tag == "":
 		options = _pick_weighted_unique(available, REWARD_CHOICE_COUNT)
@@ -866,7 +1143,7 @@ func _generate_reward_options() -> Array[Dictionary]:
 				off_pool.append(reward)
 
 		options.append_array(_pick_weighted_unique(same_pool, mini(2, same_pool.size())))
-		var remaining := REWARD_CHOICE_COUNT - options.size()
+		var remaining = REWARD_CHOICE_COUNT - options.size()
 		if remaining > 0 and not off_pool.is_empty():
 			options.append_array(_pick_weighted_unique(off_pool, 1))
 		remaining = REWARD_CHOICE_COUNT - options.size()
@@ -876,16 +1153,16 @@ func _generate_reward_options() -> Array[Dictionary]:
 			merged_pool.append_array(off_pool)
 			var filtered_pool: Array = []
 			for reward in merged_pool:
-				var reward_id := str(reward.get("id", ""))
+				var reward_id = str(reward.get("id", ""))
 				if not _contains_reward_id(options, reward_id):
 					filtered_pool.append(reward)
 			options.append_array(_pick_weighted_unique(filtered_pool, remaining))
 
 	if current_floor >= 9 and not _has_rescue_piece():
-		var rescue_reward := _pick_rescue_reward(available, options)
+		var rescue_reward = _pick_rescue_reward(available, options)
 		if not rescue_reward.is_empty():
 			reward_guaranteed_this_floor = true
-			var rescue_id := str(rescue_reward.get("id", ""))
+			var rescue_id = str(rescue_reward.get("id", ""))
 			if not _contains_reward_id(options, rescue_id):
 				if options.size() >= REWARD_CHOICE_COUNT:
 					options[REWARD_CHOICE_COUNT - 1] = rescue_reward
@@ -897,7 +1174,7 @@ func _generate_reward_options() -> Array[Dictionary]:
 func _get_available_rewards() -> Array:
 	var result: Array = []
 	for reward in REWARD_POOL:
-		var reward_id := str(reward.get("id", ""))
+		var reward_id = str(reward.get("id", ""))
 		if reward_id == "":
 			continue
 		if owned_reward_ids.has(reward_id):
@@ -911,7 +1188,7 @@ func _pick_weighted_unique(pool: Array, count: int) -> Array[Dictionary]:
 		return picks
 	var mutable_pool: Array = pool.duplicate(true)
 	while picks.size() < count and not mutable_pool.is_empty():
-		var idx := _pick_weighted_index(mutable_pool)
+		var idx = _pick_weighted_index(mutable_pool)
 		if idx < 0 or idx >= mutable_pool.size():
 			break
 		picks.append(mutable_pool[idx])
@@ -921,12 +1198,12 @@ func _pick_weighted_unique(pool: Array, count: int) -> Array[Dictionary]:
 func _pick_weighted_index(pool: Array) -> int:
 	if pool.is_empty():
 		return -1
-	var total_weight := 0.0
+	var total_weight = 0.0
 	for reward in pool:
 		total_weight += _reward_weight(reward)
 	if total_weight <= 0.0:
 		return randi_range(0, pool.size() - 1)
-	var roll := randf() * total_weight
+	var roll = randf() * total_weight
 	for i in range(pool.size()):
 		roll -= _reward_weight(pool[i])
 		if roll <= 0.0:
@@ -935,9 +1212,9 @@ func _pick_weighted_index(pool: Array) -> int:
 
 func _reward_weight(reward: Dictionary) -> float:
 	var tags: Array = reward.get("tags", [])
-	var max_tag_count := 0
+	var max_tag_count = 0
 	for tag in tags:
-		var count := int(owned_tag_counts.get(str(tag), 0))
+		var count = int(owned_tag_counts.get(str(tag), 0))
 		max_tag_count = maxi(max_tag_count, count)
 	if max_tag_count >= 2:
 		return REWARD_WEIGHT_MULTI
@@ -946,10 +1223,10 @@ func _reward_weight(reward: Dictionary) -> float:
 	return 1.0
 
 func _get_primary_tag() -> String:
-	var primary_tag := ""
-	var best_count := 0
+	var primary_tag = ""
+	var best_count = 0
 	for key in owned_tag_counts.keys():
-		var count := int(owned_tag_counts[key])
+		var count = int(owned_tag_counts[key])
 		if count > best_count:
 			best_count = count
 			primary_tag = str(key)
@@ -977,13 +1254,13 @@ func _pick_rescue_reward(available: Array, options: Array[Dictionary]) -> Dictio
 	for reward in available:
 		if not _is_rescue_reward(reward):
 			continue
-		var reward_id := str(reward.get("id", ""))
+		var reward_id = str(reward.get("id", ""))
 		if _contains_reward_id(options, reward_id):
 			continue
 		candidates.append(reward)
 	if candidates.is_empty():
 		return {}
-	var picked := _pick_weighted_unique(candidates, 1)
+	var picked = _pick_weighted_unique(candidates, 1)
 	if picked.is_empty():
 		return {}
 	return picked[0]
@@ -997,7 +1274,7 @@ func _record_floor_time_if_needed() -> void:
 	var floor_type: String = str(current_floor_data.get("type", "combat"))
 	if floor_type not in ["combat", "boss"]:
 		return
-	var elapsed := _current_floor_elapsed()
+	var elapsed = _current_floor_elapsed()
 	run_floor_times[current_floor] = elapsed
 	run_combat_floor_time_total += elapsed
 	run_combat_floor_count += 1
@@ -1006,18 +1283,18 @@ func _record_floor_time_if_needed() -> void:
 	floor_start_msec = 0
 
 func _log_kpi_summary(run_clear: bool) -> void:
-	var run_avg := 0.0
+	var run_avg = 0.0
 	if run_combat_floor_count > 0:
 		run_avg = run_combat_floor_time_total / float(run_combat_floor_count)
-	var session_avg := 0.0
+	var session_avg = 0.0
 	if session_total_combat_floor_count > 0:
 		session_avg = session_total_combat_floor_time / float(session_total_combat_floor_count)
-	var boss_reach_rate := 0.0
-	var boss_clear_rate := 0.0
+	var boss_reach_rate = 0.0
+	var boss_clear_rate = 0.0
 	if session_run_count > 0:
 		boss_reach_rate = 100.0 * float(session_boss_reach_count) / float(session_run_count)
 		boss_clear_rate = 100.0 * float(session_boss_clear_count) / float(session_run_count)
-	var result := "CLEAR" if run_clear else "FAIL"
+	var result = "CLEAR" if run_clear else "FAIL"
 	player.emit_signal(
 		"debug_log",
 		"KPI[%s] run_avg:%.1fs session_avg:%.1fs reach:%.1f%% clear:%.1f%% target:%.0f-%.0fs"
@@ -1032,8 +1309,8 @@ func _adjust_session_balance(run_avg: float, boss_reach_rate: float, boss_clear_
 	if session_run_count < 2:
 		return
 
-	var harden := 0
-	var ease := 0
+	var harden = 0
+	var ease = 0
 	if run_avg > 0.0:
 		if run_avg < TARGET_FLOOR_TIME_MIN:
 			harden += 1
@@ -1048,7 +1325,7 @@ func _adjust_session_balance(run_avg: float, boss_reach_rate: float, boss_clear_
 	elif session_run_count >= 3 and boss_clear_rate < 5.0:
 		ease += 1
 
-	var delta := harden - ease
+	var delta = harden - ease
 	if delta == 0:
 		return
 
@@ -1090,8 +1367,8 @@ func _append_run_play_log(
 	boss_reach_rate: float,
 	boss_clear_rate: float
 ) -> void:
-	var result := "CLEAR" if run_clear else "FAIL"
-	var now := Time.get_datetime_string_from_system()
+	var result = "CLEAR" if run_clear else "FAIL"
+	var now = Time.get_datetime_string_from_system()
 	var lines: Array[String] = []
 	lines.append("## %s Run %d (%s)" % [now, session_run_count, "AUTO" if kpi_autorun_enabled else "MANUAL"])
 	lines.append("- result: %s" % result)
@@ -1121,19 +1398,19 @@ func _format_floor_times_for_log() -> String:
 	keys.sort()
 	var parts: Array[String] = []
 	for key in keys:
-		var floor_idx := int(key)
-		var elapsed := float(run_floor_times[key])
+		var floor_idx = int(key)
+		var elapsed = float(run_floor_times[key])
 		parts.append("F%d=%.2fs" % [floor_idx, elapsed])
 	return ", ".join(parts)
 
 func _append_markdown_log(path: String, lines: Array[String]) -> void:
-	var existing := ""
+	var existing = ""
 	if FileAccess.file_exists(path):
-		var read_file := FileAccess.open(path, FileAccess.READ)
+		var read_file = FileAccess.open(path, FileAccess.READ)
 		if read_file:
 			existing = read_file.get_as_text()
 			read_file.close()
-	var write_file := FileAccess.open(path, FileAccess.WRITE)
+	var write_file = FileAccess.open(path, FileAccess.WRITE)
 	if not write_file:
 		push_warning("Failed to write log: %s" % path)
 		return
@@ -1179,23 +1456,23 @@ func _record_kpi_autorun_result(run_clear: bool, run_avg: float, boss_reach_rate
 		kpi_autorun_restart_timer = KPI_AUTORUN_RESTART_DELAY
 
 func _finalize_kpi_autorun() -> void:
-	var total_runs := kpi_autorun_results.size()
+	var total_runs = kpi_autorun_results.size()
 	if total_runs <= 0:
 		Engine.time_scale = 1.0
 		get_tree().quit()
 		return
-	var clear_count := 0
-	var reach_count := 0
-	var avg_sum := 0.0
+	var clear_count = 0
+	var reach_count = 0
+	var avg_sum = 0.0
 	for result in kpi_autorun_results:
 		avg_sum += float(result.get("run_avg", 0.0))
 		if bool(result.get("run_clear", false)):
 			clear_count += 1
 		if bool(result.get("boss_reached", false)):
 			reach_count += 1
-	var avg_floor_time := avg_sum / float(total_runs)
-	var reach_rate := 100.0 * float(reach_count) / float(total_runs)
-	var clear_rate := 100.0 * float(clear_count) / float(total_runs)
+	var avg_floor_time = avg_sum / float(total_runs)
+	var reach_rate = 100.0 * float(reach_count) / float(total_runs)
+	var clear_rate = 100.0 * float(clear_count) / float(total_runs)
 	_append_kpi_autorun_log(avg_floor_time, reach_rate, clear_rate)
 	player.emit_signal(
 		"debug_log",
@@ -1206,8 +1483,8 @@ func _finalize_kpi_autorun() -> void:
 	get_tree().quit()
 
 func _append_kpi_autorun_log(avg_floor_time: float, reach_rate: float, clear_rate: float) -> void:
-	var path := "res://KPI_AUTORUN_LOG.md"
-	var now := Time.get_datetime_string_from_system()
+	var path = "res://KPI_AUTORUN_LOG.md"
+	var now = Time.get_datetime_string_from_system()
 	var lines: Array[String] = []
 	lines.append("## %s KPI Autorun" % now)
 	lines.append("- runs: %d" % kpi_autorun_results.size())
@@ -1251,7 +1528,7 @@ func _clear_current_floor_nodes() -> void:
 func _update_hud_floor(floor_type: String, floor_name: String) -> void:
 	if not hud.has_method("set_floor_info"):
 		return
-	var type_label := "COMBAT"
+	var type_label = "COMBAT"
 	if floor_type == "event":
 		type_label = "EVENT"
 	elif floor_type == "boss":
@@ -1263,11 +1540,77 @@ func _set_run_message(message: String) -> void:
 		hud.set_run_message(message)
 	player.emit_signal("debug_log", message)
 
+func _update_threat_warning() -> void:
+	if not hud or not hud.has_method("set_threat_warning"):
+		return
+	if run_finished or floor_phase != "combat" or not player:
+		hud.set_threat_warning("", 0)
+		return
+	var best_level = 0
+	var best_dist = INF
+	var best_text = ""
+	var best_dx = 0.0
+	for node in get_tree().get_nodes_in_group("enemies"):
+		var enemy = node as BaseEnemy
+		if not enemy or enemy.current_state == BaseEnemy.EnemyState.DEAD:
+			continue
+		if enemy.current_state != BaseEnemy.EnemyState.TELEGRAPH:
+			continue
+		var threat_level = 1
+		var threat_text = "ENEMY 予兆"
+		var script_path = ""
+		if enemy.get_script() is Script:
+			script_path = String((enemy.get_script() as Script).resource_path)
+		if script_path.ends_with("hunter_drone.gd"):
+			threat_level = 2
+			threat_text = "HUNTER 射線"
+		elif script_path.ends_with("boss_eraser.gd"):
+			threat_level = 2
+			threat_text = "BOSS 予兆"
+			var action_variant: Variant = enemy.get("current_action")
+			if action_variant is Dictionary:
+				var action: Dictionary = action_variant
+				var action_type = str(action.get("type", ""))
+				match action_type:
+					"sniper_lance":
+						threat_level = 3
+						threat_text = "BOSS 狙撃槍"
+					"erase_rain":
+						threat_level = 3
+						threat_text = "BOSS 全消し"
+					"danger_burst":
+						threat_level = 3
+						threat_text = "BOSS 危険弾"
+					"dash_combo":
+						threat_text = "BOSS 突進"
+					"slash_smash":
+						threat_text = "BOSS 連撃"
+					_:
+						pass
+		var dist = enemy.global_position.distance_to(player.global_position)
+		if threat_level > best_level or (threat_level == best_level and dist < best_dist):
+			best_level = threat_level
+			best_dist = dist
+			best_text = threat_text
+			best_dx = enemy.global_position.x - player.global_position.x
+	if best_level <= 0:
+		hud.set_threat_warning("", 0)
+		return
+	var side_marker = ""
+	if best_dx >= 36.0:
+		side_marker = " >>"
+	elif best_dx <= -36.0:
+		side_marker = " <<"
+	var near_tag = ""
+	if best_dist <= 220.0:
+		near_tag = " [NEAR]"
+	hud.set_threat_warning("%s%s%s" % [best_text, side_marker, near_tag], best_level)
+
 func _update_session_metrics_display() -> void:
 	if not hud or not hud.has_method("set_session_metrics"):
 		return
-	var reach_rate := 0.0
-	var clear_rate := 0.0
+	var reach_rate = 0.0
+	var clear_rate = 0.0
 	if session_run_count > 0:
 		reach_rate = 100.0 * float(session_boss_reach_count) / float(session_run_count)
 		clear_rate = 100.0 * float(session_boss_clear_count) / float(session_run_count)
@@ -1282,10 +1625,37 @@ func _on_reward_selected(index: int) -> void:
 		return
 	_select_reward(index)
 
+func _on_player_impact_fx_requested(strength: float, duration: float, tint: Color) -> void:
+	if not ENABLE_SCREEN_IMPACT_FX:
+		return
+	if impact_overlay and impact_overlay.has_method("trigger_impact"):
+		impact_overlay.call("trigger_impact", strength, duration, tint)
+
+func _build_backdrop() -> void:
+	if world_backdrop and is_instance_valid(world_backdrop):
+		return
+	var backdrop = world_backdrop_script.new()
+	if backdrop == null:
+		return
+	world_backdrop = backdrop
+	world_backdrop.name = "Backdrop"
+	add_child(world_backdrop)
+	move_child(world_backdrop, 0)
+	if world_backdrop.has_method("configure"):
+		world_backdrop.call("configure", LEVEL_LEFT, LEVEL_RIGHT, LEVEL_TOP, LEVEL_BOTTOM, GROUND_Y)
+	if world_backdrop.has_method("set_floor_theme"):
+		world_backdrop.call("set_floor_theme", "combat", 1, {})
+
+func _update_backdrop_focus() -> void:
+	if not world_backdrop or not is_instance_valid(world_backdrop) or not player:
+		return
+	if world_backdrop.has_method("set_focus_x"):
+		world_backdrop.call("set_focus_x", player.global_position.x)
+
 func _build_stage() -> void:
 	if has_node("Stage"):
 		return
-	var stage := Node2D.new()
+	var stage = Node2D.new()
 	stage.name = "Stage"
 	add_child(stage)
 	_create_static_rect(
@@ -1308,12 +1678,12 @@ func _build_stage() -> void:
 	_create_static_rect(stage, Vector2(2840.0, 330.0), Vector2(240.0, 28.0))
 
 func _create_static_rect(parent: Node, center: Vector2, size: Vector2) -> void:
-	var body := StaticBody2D.new()
+	var body = StaticBody2D.new()
 	body.collision_layer = 1
 	body.collision_mask = 0
 	body.position = center
-	var collision := CollisionShape2D.new()
-	var shape := RectangleShape2D.new()
+	var collision = CollisionShape2D.new()
+	var shape = RectangleShape2D.new()
 	shape.size = size
 	collision.shape = shape
 	body.add_child(collision)
@@ -1328,33 +1698,14 @@ func _setup_camera() -> void:
 	camera.position_smoothing_enabled = true
 	camera.position_smoothing_speed = 6.0
 
+func _setup_impact_overlay() -> void:
+	if not ENABLE_SCREEN_IMPACT_FX:
+		return
+	if impact_overlay and is_instance_valid(impact_overlay):
+		return
+	impact_overlay = impact_overlay_script.new()
+	impact_overlay.name = "ImpactOverlay"
+	add_child(impact_overlay)
+
 func _draw() -> void:
-	var world_width := (LEVEL_RIGHT - LEVEL_LEFT) + 1000.0
-	var world_left := LEVEL_LEFT - 500.0
-	var sky_rect := Rect2(world_left, LEVEL_TOP - 1200.0, world_width, GROUND_Y - LEVEL_TOP + 1200.0)
-	draw_rect(sky_rect, Color(0.09, 0.11, 0.16))
-	for i in range(6):
-		var y := GROUND_Y - 240.0 - float(i) * 45.0
-		var c := Color(0.14, 0.16 + 0.02 * i, 0.2 + 0.03 * i, 0.28)
-		draw_line(Vector2(world_left, y), Vector2(world_left + world_width, y), c, 2.0)
-	var ground_rect := Rect2(world_left, GROUND_Y, world_width, 420.0)
-	draw_rect(ground_rect, Color(0.18, 0.16, 0.13))
-	for x in range(int(LEVEL_LEFT), int(LEVEL_RIGHT), 160):
-		draw_line(
-			Vector2(float(x), GROUND_Y),
-			Vector2(float(x) + 80.0, GROUND_Y),
-			Color(0.25, 0.23, 0.18, 0.35),
-			2.0
-		)
-	draw_line(
-		Vector2(ENEMY_SPAWN_START_X, LEVEL_TOP),
-		Vector2(ENEMY_SPAWN_START_X, GROUND_Y),
-		Color(0.8, 0.35, 0.2, 0.12),
-		1.0
-	)
-	draw_line(
-		Vector2(ENEMY_SPAWN_END_X, LEVEL_TOP),
-		Vector2(ENEMY_SPAWN_END_X, GROUND_Y),
-		Color(0.8, 0.35, 0.2, 0.12),
-		1.0
-	)
+	pass
