@@ -45,6 +45,8 @@ const KPI_AUTORUN_RUN_TIMEOUT := 120.0
 const KPI_AUTORUN_HP_MULT := 5.0
 const KPI_AUTORUN_DAMAGE_MULT := 2.4
 const KPI_AUTORUN_STAMINA_REGEN_BONUS := 18.0
+const RUN_PLAY_LOG_PATH := "res://RUN_PLAY_LOG.md"
+const BOSS_ASSIST_MAX_LEVEL := 3
 
 const REWARD_POOL := [
 	{
@@ -179,6 +181,7 @@ var run_floor_times: Dictionary = {}
 var session_run_count: int = 0
 var session_boss_reach_count: int = 0
 var session_boss_clear_count: int = 0
+var session_boss_fail_streak: int = 0
 var session_total_combat_floor_time: float = 0.0
 var session_total_combat_floor_count: int = 0
 var session_enemy_hp_multiplier: float = 1.0
@@ -199,7 +202,9 @@ var autoplay_guard_hold: float = 0.0
 var autoplay_skill1_cd: float = 0.0
 var autoplay_skill2_cd: float = 0.0
 var run_start_msec: int = 0
+var run_start_datetime: String = ""
 var run_end_reason: String = ""
+var run_boss_assist_level: int = 0
 
 func _ready() -> void:
 	randomize()
@@ -268,7 +273,9 @@ func _start_run() -> void:
 	session_run_count += 1
 	run_finished = false
 	run_start_msec = Time.get_ticks_msec()
+	run_start_datetime = Time.get_datetime_string_from_system()
 	run_end_reason = ""
+	run_boss_assist_level = 0
 	current_floor = 1
 	floor_phase = "idle"
 	run_boss_reached = false
@@ -290,6 +297,7 @@ func _start_run() -> void:
 	autoplay_guard_hold = 0.0
 	autoplay_skill1_cd = 0.0
 	autoplay_skill2_cd = 0.0
+	_update_session_metrics_display()
 	_start_floor(current_floor)
 
 func _prepare_player_for_kpi_autorun() -> void:
@@ -436,16 +444,32 @@ func _autoplay_drive_player() -> void:
 		player.ai_guard_end()
 		return
 
-	var dx: float = enemy.global_position.x - player.global_position.x
-	var abs_dx: float = absf(dx)
+	var floor_type := str(current_floor_data.get("type", ""))
+	var target_x: float = enemy.global_position.x
 	var preferred_distance: float = 122.0
-	if str(current_floor_data.get("type", "")) == "boss":
+	var prioritize_safe_zone := false
+	var enemy_dx: float = enemy.global_position.x - player.global_position.x
+	var enemy_abs_dx: float = absf(enemy_dx)
+	if floor_type == "boss":
 		preferred_distance = 148.0
+		if enemy.has_method("get_autoplay_hint"):
+			var hint_variant: Variant = enemy.call("get_autoplay_hint")
+			if hint_variant is Dictionary:
+				var hint: Dictionary = hint_variant
+				if bool(hint.get("hazard_active", false)):
+					target_x = float(hint.get("safe_center_x", target_x))
+					preferred_distance = 0.0
+					prioritize_safe_zone = true
+	var nav_dx: float = target_x - player.global_position.x
+	var nav_abs_dx: float = absf(nav_dx)
 	var move_axis: float = 0.0
-	if abs_dx > preferred_distance + 36.0:
-		move_axis = signf(dx) * 0.85
-	elif abs_dx < preferred_distance - 30.0:
-		move_axis = -signf(dx) * 0.75
+	if prioritize_safe_zone:
+		if nav_abs_dx > 28.0:
+			move_axis = signf(nav_dx)
+	elif nav_abs_dx > preferred_distance + 36.0:
+		move_axis = signf(nav_dx) * 0.85
+	elif nav_abs_dx < preferred_distance - 30.0:
+		move_axis = -signf(nav_dx) * 0.75
 	player.set_virtual_move_axis(move_axis)
 
 	var projectile_pressure := _count_projectiles_near_player(260.0)
@@ -453,7 +477,7 @@ func _autoplay_drive_player() -> void:
 	var crowd_count := _count_enemies_near_player(170.0)
 
 	if player.max_hp > 0 and float(player.hp) / float(player.max_hp) <= 0.72:
-		if player.estus_charges > 0 and autoplay_estus_cd <= 0.0 and abs_dx > 96.0 and close_projectiles == 0:
+		if player.estus_charges > 0 and autoplay_estus_cd <= 0.0 and enemy_abs_dx > 96.0 and close_projectiles == 0:
 			player.ai_estus()
 			autoplay_estus_cd = 2.0
 			return
@@ -476,19 +500,22 @@ func _autoplay_drive_player() -> void:
 		autoplay_roll_cd = 0.66
 		return
 
-	if abs_dx <= 112.0 and autoplay_attack_cd <= 0.0:
+	if prioritize_safe_zone and nav_abs_dx > 56.0:
+		return
+
+	if enemy_abs_dx <= 112.0 and autoplay_attack_cd <= 0.0:
 		player.ai_guard_end()
 		player.ai_attack()
 		autoplay_attack_cd = 0.11
 		return
 
-	if abs_dx <= 168.0 and autoplay_skill1_cd <= 0.0:
+	if enemy_abs_dx <= 168.0 and autoplay_skill1_cd <= 0.0:
 		player.ai_guard_end()
 		player.ai_skill1()
 		autoplay_skill1_cd = 3.1
 		return
 
-	if abs_dx <= 220.0 and crowd_count >= 2 and autoplay_skill2_cd <= 0.0:
+	if enemy_abs_dx <= 220.0 and crowd_count >= 2 and autoplay_skill2_cd <= 0.0:
 		player.ai_guard_end()
 		player.ai_skill2()
 		autoplay_skill2_cd = 4.9
@@ -554,6 +581,8 @@ func _start_floor(floor_number: int) -> void:
 	var floor_name: String = floor_data.get("name", "")
 	if kpi_autorun_enabled and floor_type == "boss":
 		_prepare_player_for_kpi_boss_attempt()
+	elif floor_type == "boss":
+		_prepare_player_for_boss_assist()
 	_update_hud_floor(floor_type, floor_name)
 	match floor_type:
 		"combat", "boss":
@@ -563,7 +592,10 @@ func _start_floor(floor_number: int) -> void:
 				if not run_boss_reached:
 					run_boss_reached = true
 					session_boss_reach_count += 1
-				_set_run_message("10F: 消しゴム神 出現")
+				if run_boss_assist_level > 0:
+					_set_run_message("10F: 消しゴム神 出現 (ASSIST Lv%d)" % run_boss_assist_level)
+				else:
+					_set_run_message("10F: 消しゴム神 出現")
 			else:
 				_set_run_message("F%d 開始" % current_floor)
 		"event":
@@ -583,6 +615,28 @@ func _prepare_player_for_kpi_boss_attempt() -> void:
 	player.stamina = player.max_stamina
 	player.estus_charges = player.estus_max_charges
 	player.bonus_damage_multiplier *= 1.35
+	player.emit_signal("hp_changed", player.hp, player.max_hp)
+	player.emit_signal("stamina_changed", player.stamina, player.max_stamina)
+	player.emit_signal("estus_changed", player.estus_charges, player.estus_max_charges)
+
+func _prepare_player_for_boss_assist() -> void:
+	if not player:
+		return
+	run_boss_assist_level = clampi(session_boss_fail_streak, 0, BOSS_ASSIST_MAX_LEVEL)
+	if run_boss_assist_level <= 0:
+		return
+	var assist_f := float(run_boss_assist_level)
+	player.estus_max_charges = mini(7, player.estus_max_charges + run_boss_assist_level)
+	player.estus_heal = mini(player.max_hp, player.estus_heal + 8 * run_boss_assist_level)
+	player.stamina_regen += 2.2 * assist_f
+	player.max_hp = int(round(float(player.max_hp) * (1.0 + 0.05 * assist_f)))
+	player.hp = player.max_hp
+	player.stamina = player.max_stamina
+	player.estus_charges = player.estus_max_charges
+	player.bonus_damage_multiplier *= 1.0 + 0.12 * assist_f
+	player.guard_reduction = minf(0.8, player.guard_reduction + 0.08 * assist_f)
+	player.roll_iframes += 0.025 * assist_f
+	player.iframes_duration += 0.045 * assist_f
 	player.emit_signal("hp_changed", player.hp, player.max_hp)
 	player.emit_signal("stamina_changed", player.stamina, player.max_stamina)
 	player.emit_signal("estus_changed", player.estus_charges, player.estus_max_charges)
@@ -638,6 +692,11 @@ func _apply_floor_scaling(node: Node) -> void:
 		return
 	var hp_scale := (1.0 + 0.08 * float(current_floor - 1)) * session_enemy_hp_multiplier
 	var dmg_scale := (1.0 + 0.06 * float(current_floor - 1)) * session_enemy_damage_multiplier
+	if enemy.get_script() is Script:
+		var script_path: String = String((enemy.get_script() as Script).resource_path)
+		if script_path.ends_with("boss_eraser.gd"):
+			hp_scale = session_enemy_hp_multiplier
+			dmg_scale = session_enemy_damage_multiplier
 	if enemy.has_method("apply_floor_scaling"):
 		enemy.call_deferred("apply_floor_scaling", hp_scale, dmg_scale)
 
@@ -716,6 +775,7 @@ func _go_to_next_floor() -> void:
 func _finish_run() -> void:
 	run_finished = true
 	run_end_reason = "clear"
+	session_boss_fail_streak = 0
 	floor_phase = "finished"
 	_clear_current_floor_nodes()
 	if hud.has_method("hide_reward_options"):
@@ -729,6 +789,10 @@ func _fail_run() -> void:
 	run_finished = true
 	if run_end_reason == "":
 		run_end_reason = "player_dead"
+	if run_boss_reached:
+		session_boss_fail_streak += 1
+	else:
+		session_boss_fail_streak = maxi(0, session_boss_fail_streak - 1)
 	floor_phase = "finished"
 	_clear_current_floor_nodes()
 	if hud.has_method("hide_reward_options"):
@@ -959,6 +1023,8 @@ func _log_kpi_summary(run_clear: bool) -> void:
 		"KPI[%s] run_avg:%.1fs session_avg:%.1fs reach:%.1f%% clear:%.1f%% target:%.0f-%.0fs"
 		% [result, run_avg, session_avg, boss_reach_rate, boss_clear_rate, TARGET_FLOOR_TIME_MIN, TARGET_FLOOR_TIME_MAX]
 	)
+	_update_session_metrics_display()
+	_append_run_play_log(run_clear, run_avg, session_avg, boss_reach_rate, boss_clear_rate)
 	_adjust_session_balance(run_avg, boss_reach_rate, boss_clear_rate)
 	_record_kpi_autorun_result(run_clear, run_avg, boss_reach_rate, boss_clear_rate)
 
@@ -1016,6 +1082,69 @@ func _adjust_session_balance(run_avg: float, boss_reach_rate: float, boss_clear_
 			session_extra_reinforcement_count
 		]
 	)
+
+func _append_run_play_log(
+	run_clear: bool,
+	run_avg: float,
+	session_avg: float,
+	boss_reach_rate: float,
+	boss_clear_rate: float
+) -> void:
+	var result := "CLEAR" if run_clear else "FAIL"
+	var now := Time.get_datetime_string_from_system()
+	var lines: Array[String] = []
+	lines.append("## %s Run %d (%s)" % [now, session_run_count, "AUTO" if kpi_autorun_enabled else "MANUAL"])
+	lines.append("- result: %s" % result)
+	lines.append("- start_time: %s" % run_start_datetime)
+	lines.append("- end_reason: %s" % run_end_reason)
+	lines.append("- final_floor: %d" % current_floor)
+	lines.append("- boss_reached_this_run: %s" % ("YES" if run_boss_reached else "NO"))
+	lines.append("- boss_assist_level: %d" % run_boss_assist_level)
+	lines.append("- run_elapsed_real_s: %.2f" % _current_run_elapsed_real())
+	lines.append("- run_avg_floor_time_s: %.2f" % run_avg)
+	lines.append("- session_avg_floor_time_s: %.2f" % session_avg)
+	lines.append("- session_boss_reach_rate: %.2f%%" % boss_reach_rate)
+	lines.append("- session_boss_clear_rate: %.2f%%" % boss_clear_rate)
+	lines.append("- session_balance: HPx%.2f DMGx%.2f RFTime:%.1f Extra:+%d" % [
+		session_enemy_hp_multiplier,
+		session_enemy_damage_multiplier,
+		session_reinforcement_trigger_time,
+		session_extra_reinforcement_count
+	])
+	lines.append("- floor_times: %s" % _format_floor_times_for_log())
+	_append_markdown_log(RUN_PLAY_LOG_PATH, lines)
+
+func _format_floor_times_for_log() -> String:
+	if run_floor_times.is_empty():
+		return "(none)"
+	var keys: Array = run_floor_times.keys()
+	keys.sort()
+	var parts: Array[String] = []
+	for key in keys:
+		var floor_idx := int(key)
+		var elapsed := float(run_floor_times[key])
+		parts.append("F%d=%.2fs" % [floor_idx, elapsed])
+	return ", ".join(parts)
+
+func _append_markdown_log(path: String, lines: Array[String]) -> void:
+	var existing := ""
+	if FileAccess.file_exists(path):
+		var read_file := FileAccess.open(path, FileAccess.READ)
+		if read_file:
+			existing = read_file.get_as_text()
+			read_file.close()
+	var write_file := FileAccess.open(path, FileAccess.WRITE)
+	if not write_file:
+		push_warning("Failed to write log: %s" % path)
+		return
+	if existing != "":
+		write_file.store_string(existing)
+		if not existing.ends_with("\n"):
+			write_file.store_string("\n")
+		write_file.store_string("\n")
+	write_file.store_string("\n".join(lines))
+	write_file.store_string("\n")
+	write_file.close()
 
 func _record_kpi_autorun_result(run_clear: bool, run_avg: float, boss_reach_rate: float, boss_clear_rate: float) -> void:
 	if not kpi_autorun_enabled:
@@ -1111,24 +1240,7 @@ func _append_kpi_autorun_log(avg_floor_time: float, reach_rate: float, clear_rat
 				float(result.get("run_elapsed_real_s", 0.0))
 			]
 		)
-	var existing := ""
-	if FileAccess.file_exists(path):
-		var read_file := FileAccess.open(path, FileAccess.READ)
-		if read_file:
-			existing = read_file.get_as_text()
-			read_file.close()
-	var write_file := FileAccess.open(path, FileAccess.WRITE)
-	if not write_file:
-		push_warning("Failed to write KPI log: %s" % path)
-		return
-	if existing != "":
-		write_file.store_string(existing)
-		if not existing.ends_with("\n"):
-			write_file.store_string("\n")
-		write_file.store_string("\n")
-	write_file.store_string("\n".join(lines))
-	write_file.store_string("\n")
-	write_file.close()
+	_append_markdown_log(path, lines)
 
 func _clear_current_floor_nodes() -> void:
 	for node in get_tree().get_nodes_in_group("enemies"):
@@ -1150,6 +1262,16 @@ func _set_run_message(message: String) -> void:
 	if hud.has_method("set_run_message"):
 		hud.set_run_message(message)
 	player.emit_signal("debug_log", message)
+
+func _update_session_metrics_display() -> void:
+	if not hud or not hud.has_method("set_session_metrics"):
+		return
+	var reach_rate := 0.0
+	var clear_rate := 0.0
+	if session_run_count > 0:
+		reach_rate = 100.0 * float(session_boss_reach_count) / float(session_run_count)
+		clear_rate = 100.0 * float(session_boss_clear_count) / float(session_run_count)
+	hud.set_session_metrics(session_run_count, reach_rate, clear_rate, session_boss_fail_streak)
 
 func _on_stick_input(direction: Vector2) -> void:
 	if player and player.has_method("set_virtual_move_axis"):

@@ -639,46 +639,47 @@ func _draw() -> void:
 	var facing := 1.0 if facing_dir.x >= 0.0 else -1.0
 	var step := 0.0
 	if current_state == State.MOVE and is_on_floor():
-		step = sin(float(Time.get_ticks_msec()) * 0.02) * 3.2
+		step = sin(float(Time.get_ticks_msec()) * 0.02) * 2.7
+	var lean := clampf(velocity.x / maxf(move_speed, 1.0), -1.0, 1.0) * 1.6
 
-	draw_circle(Vector2(0, 14), 8.0, Color(0.0, 0.0, 0.0, 0.2))
+	draw_circle(Vector2(0, 12), 6.8, Color(0.0, 0.0, 0.0, 0.19))
 
-	var head := Vector2(0, -16)
-	var neck := Vector2(0, -9)
-	var pelvis := Vector2(0, 3)
-	var lead_knee := Vector2(4.4 * facing, 9.0 + step * 0.2)
-	var rear_knee := Vector2(-3.9 * facing, 8.0 - step * 0.2)
-	var lead_foot := Vector2(6.2 * facing + step, 16.0)
-	var rear_foot := Vector2(-5.8 * facing - step * 0.7, 15.0)
-	var lead_arm := Vector2(7.6 * facing, -2.2 + step * 0.28)
-	var rear_arm := Vector2(-7.0 * facing, -2.8 - step * 0.24)
+	var head := Vector2(lean * 0.35, -13.8)
+	var neck := Vector2(lean * 0.2, -7.8)
+	var pelvis := Vector2(-lean * 0.2, 2.0)
+	var lead_knee := Vector2(3.8 * facing, 7.2 + step * 0.2)
+	var rear_knee := Vector2(-3.2 * facing, 6.8 - step * 0.2)
+	var lead_foot := Vector2(5.2 * facing + step, 13.0)
+	var rear_foot := Vector2(-4.8 * facing - step * 0.7, 12.4)
+	var lead_arm := Vector2(6.2 * facing, -1.7 + step * 0.22)
+	var rear_arm := Vector2(-5.8 * facing, -2.2 - step * 0.2)
 
-	draw_line(neck, pelvis, body_color, 2.6)
-	draw_line(neck, lead_arm, body_color.darkened(0.08), 2.2)
-	draw_line(neck, rear_arm, body_color.darkened(0.22), 2.1)
-	draw_line(pelvis, lead_knee, body_color.darkened(0.08), 2.25)
-	draw_line(lead_knee, lead_foot, body_color.darkened(0.08), 2.1)
-	draw_line(pelvis, rear_knee, body_color.darkened(0.22), 2.2)
-	draw_line(rear_knee, rear_foot, body_color.darkened(0.22), 2.0)
-	draw_circle(head, 5.2, body_color.lightened(0.05))
-	draw_circle(head + Vector2(2.0 * facing, -0.7), 0.95, Color(0.08, 0.08, 0.1))
+	draw_line(neck, pelvis, body_color, 2.1)
+	draw_line(neck, lead_arm, body_color.darkened(0.08), 1.9)
+	draw_line(neck, rear_arm, body_color.darkened(0.22), 1.85)
+	draw_line(pelvis, lead_knee, body_color.darkened(0.08), 1.95)
+	draw_line(lead_knee, lead_foot, body_color.darkened(0.08), 1.85)
+	draw_line(pelvis, rear_knee, body_color.darkened(0.22), 1.9)
+	draw_line(rear_knee, rear_foot, body_color.darkened(0.22), 1.8)
+	draw_circle(head, 4.2, body_color.lightened(0.05))
+	draw_circle(head + Vector2(1.65 * facing, -0.55), 0.78, Color(0.08, 0.08, 0.1))
 
 	if current_state in [State.SKILL_1, State.SKILL_2]:
-		draw_arc(Vector2.ZERO, 17.0, 0.0, TAU, 36, Color(0.72, 0.44, 1.0, 0.33), 1.6)
+		draw_arc(Vector2.ZERO, 14.5, 0.0, TAU, 34, Color(0.72, 0.44, 1.0, 0.33), 1.45)
 
 	if current_state in [State.ATTACK_1, State.ATTACK_2, State.ATTACK_3]:
-		var slash_pos := Vector2(15.0 * facing, -7.0)
+		var slash_pos := Vector2(12.8 * facing, -6.2)
 		var start_angle := -PI * 0.33 if facing > 0.0 else PI * 0.67
-		draw_arc(slash_pos, 14.0, start_angle, start_angle + PI * 0.72, 18, Color(0.95, 1.0, 1.0, 0.68), 2.0)
-		draw_arc(slash_pos, 18.0, start_angle + 0.08, start_angle + PI * 0.64, 18, Color(0.55, 0.86, 1.0, 0.32), 1.4)
+		draw_arc(slash_pos, 12.0, start_angle, start_angle + PI * 0.72, 18, Color(0.95, 1.0, 1.0, 0.68), 1.8)
+		draw_arc(slash_pos, 15.5, start_angle + 0.08, start_angle + PI * 0.64, 18, Color(0.55, 0.86, 1.0, 0.32), 1.25)
 
 	if current_state == State.GUARD:
-		var guard_pos := Vector2(8.5 * facing, -5.0)
+		var guard_pos := Vector2(7.0 * facing, -4.2)
 		var guard_perp := Vector2(-facing, 0.0)
 		draw_line(
 			guard_pos + guard_perp * 2.0 + Vector2(0.0, -7.0),
 			guard_pos + guard_perp * 2.0 + Vector2(0.0, 8.0),
 			Color(0.36, 1.0, 0.54, 0.9),
-			2.6
+			2.2
 		)
-		draw_arc(guard_pos + guard_perp * 2.0, 8.0, -PI * 0.45, PI * 0.45, 14, Color(0.36, 1.0, 0.54, 0.45), 1.8)
+		draw_arc(guard_pos + guard_perp * 2.0, 6.5, -PI * 0.45, PI * 0.45, 14, Color(0.36, 1.0, 0.54, 0.45), 1.55)

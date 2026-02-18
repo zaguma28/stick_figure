@@ -1,6 +1,8 @@
 extends BaseEnemy
 
 var bullet_scene: PackedScene = preload("res://scenes/enemies/bullet.tscn")
+const BASE_MAX_HP := 980
+const BASE_CONTACT_DAMAGE := 24
 
 const LOOP_DURATIONS := {
 	1: 18.0,
@@ -11,23 +13,23 @@ const LOOP_DURATIONS := {
 const PHASE_PATTERNS := {
 	1: [
 		{"time": 0.0, "name": "起動小弾", "type": "small_burst", "telegraph": 0.8, "duration": 0.45, "count": 3, "damage": 14, "speed": 320.0, "spread": 0.34},
-		{"time": 2.2, "name": "横薙ぎ", "type": "slash", "telegraph": 0.45, "duration": 0.4, "range": 86.0, "damage": 24},
-		{"time": 4.6, "name": "直線突進", "type": "dash_combo", "telegraph": 0.75, "duration": 0.85, "damage": 30, "dashes": 1, "dash_distance": 220.0, "dash_interval": 0.35},
-		{"time": 7.0, "name": "押しつぶし小", "type": "crush_small", "telegraph": 0.65, "duration": 0.6, "radius": 112.0, "damage": 24},
+		{"time": 2.2, "name": "横薙ぎ", "type": "slash", "telegraph": 0.48, "duration": 0.4, "range": 86.0, "damage": 20},
+		{"time": 4.6, "name": "直線突進", "type": "dash_combo", "telegraph": 0.8, "duration": 0.9, "damage": 26, "dashes": 1, "dash_distance": 210.0, "dash_interval": 0.38},
+		{"time": 7.0, "name": "押しつぶし小", "type": "crush_small", "telegraph": 0.7, "duration": 0.62, "radius": 108.0, "damage": 20},
 		{"time": 10.0, "name": "休止", "type": "rest", "telegraph": 0.0, "duration": 2.0}
 	],
 	2: [
 		{"time": 0.0, "name": "弾幕リング", "type": "ring_shot", "telegraph": 0.55, "duration": 0.45, "count": 12, "damage": 14, "speed": 300.0},
-		{"time": 3.2, "name": "安全地帯スライド", "type": "safe_slide", "telegraph": 0.4, "duration": 1.35, "damage": 10, "field_duration": 2.8, "safe_half": 105.0},
-		{"time": 7.0, "name": "追跡小弾", "type": "tracking_burst", "telegraph": 0.2, "duration": 1.25, "count": 5, "damage": 14, "speed": 360.0, "interval": 0.22},
-		{"time": 10.5, "name": "押しつぶし中", "type": "crush_mid", "telegraph": 0.75, "duration": 0.75, "radius": 132.0, "damage": 24},
-		{"time": 14.5, "name": "突進2連", "type": "dash_combo", "telegraph": 0.65, "duration": 1.35, "damage": 30, "dashes": 2, "dash_distance": 230.0, "dash_interval": 0.42}
+		{"time": 3.2, "name": "安全地帯スライド", "type": "safe_slide", "telegraph": 0.45, "duration": 1.25, "damage": 8, "field_duration": 2.5, "safe_half": 128.0},
+		{"time": 7.0, "name": "追跡小弾", "type": "tracking_burst", "telegraph": 0.24, "duration": 1.25, "count": 5, "damage": 12, "speed": 340.0, "interval": 0.24},
+		{"time": 10.5, "name": "押しつぶし中", "type": "crush_mid", "telegraph": 0.8, "duration": 0.8, "radius": 126.0, "damage": 20},
+		{"time": 14.5, "name": "突進2連", "type": "dash_combo", "telegraph": 0.7, "duration": 1.4, "damage": 26, "dashes": 2, "dash_distance": 220.0, "dash_interval": 0.44}
 	],
 	3: [
-		{"time": 0.0, "name": "危険弾バースト", "type": "danger_burst", "telegraph": 0.35, "duration": 0.45, "count": 6, "damage": 32, "speed": 410.0, "spread": 0.5},
-		{"time": 3.4, "name": "斬上→叩き", "type": "slash_smash", "telegraph": 0.4, "duration": 0.95, "slash_range": 92.0, "slash_damage": 24, "smash_radius": 155.0, "smash_damage": 42},
-		{"time": 7.8, "name": "突進3連", "type": "dash_combo", "telegraph": 0.55, "duration": 1.75, "damage": 30, "dashes": 3, "dash_distance": 240.0, "dash_interval": 0.36},
-		{"time": 12.0, "name": "全消し（大技）", "type": "erase_rain", "telegraph": 0.9, "duration": 4.0, "rain_damage": 12, "interval": 0.2, "field_damage": 10, "safe_half": 150.0},
+		{"time": 0.0, "name": "危険弾バースト", "type": "danger_burst", "telegraph": 0.42, "duration": 0.48, "count": 6, "damage": 26, "speed": 390.0, "spread": 0.5},
+		{"time": 3.4, "name": "斬上→叩き", "type": "slash_smash", "telegraph": 0.46, "duration": 1.0, "slash_range": 90.0, "slash_damage": 20, "smash_radius": 145.0, "smash_damage": 32},
+		{"time": 7.8, "name": "突進3連", "type": "dash_combo", "telegraph": 0.62, "duration": 1.85, "damage": 26, "dashes": 3, "dash_distance": 220.0, "dash_interval": 0.4},
+		{"time": 12.0, "name": "全消し（大技）", "type": "erase_rain", "telegraph": 1.0, "duration": 3.5, "rain_damage": 10, "interval": 0.24, "field_damage": 8, "safe_half": 170.0},
 		{"time": 18.0, "name": "休止", "type": "rest", "telegraph": 0.0, "duration": 1.6}
 	]
 }
@@ -43,10 +45,10 @@ var telegraph_color: Color = Color(1.0, 0.86, 0.25, 0.35)
 var floor_hazards: Array[Dictionary] = []
 
 func _ready() -> void:
-	max_hp = 1100
-	contact_damage = 28
-	move_speed = 92.0
-	max_poise = 220.0
+	max_hp = BASE_MAX_HP
+	contact_damage = BASE_CONTACT_DAMAGE
+	move_speed = 88.0
+	max_poise = 200.0
 	poise_regen_rate = 6.0
 	down_duration = 1.5
 	attack_range = 96.0
@@ -56,8 +58,11 @@ func _ready() -> void:
 	_enter_phase(1)
 	_broadcast_to_player("BOSS: 消しゴム神 出現")
 
-func apply_floor_scaling(_hp_scale: float, _damage_scale: float) -> void:
-	# ボスは仕様値を固定で運用する
+func apply_floor_scaling(hp_scale: float, damage_scale: float) -> void:
+	var hp_mult := clampf(hp_scale, 0.78, 1.25)
+	var dmg_mult := clampf(damage_scale, 0.78, 1.20)
+	max_hp = maxi(640, int(round(float(BASE_MAX_HP) * hp_mult)))
+	contact_damage = maxi(10, int(round(float(BASE_CONTACT_DAMAGE) * dmg_mult)))
 	hp = max_hp
 
 func _update_state(delta: float) -> void:
@@ -176,14 +181,14 @@ func _start_action() -> void:
 			_fire_aimed_burst(
 				int(current_action.get("count", 6)),
 				float(current_action.get("spread", 0.5)),
-				int(current_action.get("damage", 38)),
-				float(current_action.get("speed", 440.0))
+				int(current_action.get("damage", 26)),
+				float(current_action.get("speed", 390.0))
 			)
 		"erase_rain":
 			_spawn_erase_field_hazard(
-				int(current_action.get("field_damage", 12)),
-				float(current_action.get("duration", 4.0)),
-				float(current_action.get("safe_half", 140.0))
+				int(current_action.get("field_damage", 8)),
+				float(current_action.get("duration", 3.5)),
+				float(current_action.get("safe_half", 170.0))
 			)
 		"rest":
 			velocity.x = 0.0
@@ -194,13 +199,13 @@ func _process_action(delta: float) -> void:
 	match action_type:
 		"slash":
 			if action_step == 0 and action_timer >= 0.08:
-				_try_melee_hit(float(current_action.get("range", 86.0)), int(current_action.get("damage", 28)), true)
+				_try_melee_hit(float(current_action.get("range", 86.0)), int(current_action.get("damage", 22)), true)
 				action_step = 1
 		"crush_small", "crush_mid":
 			if action_step == 0 and action_timer >= 0.16:
-				_aoe_hit(float(current_action.get("radius", 120.0)), int(current_action.get("damage", 28)))
+				_aoe_hit(float(current_action.get("radius", 120.0)), int(current_action.get("damage", 22)))
 				if action_type == "crush_mid":
-					_fire_ring(6, 14, 260.0, PI * 0.16)
+					_fire_ring(6, 12, 240.0, PI * 0.16)
 				action_step = 1
 		"dash_combo":
 			var interval := maxf(0.12, float(current_action.get("dash_interval", 0.36)))
@@ -208,7 +213,7 @@ func _process_action(delta: float) -> void:
 			while action_step < total and action_timer >= interval * float(action_step):
 				_perform_dash_strike(
 					float(current_action.get("dash_distance", 220.0)),
-					int(current_action.get("damage", 34))
+					int(current_action.get("damage", 28))
 				)
 				action_step += 1
 		"tracking_burst":
@@ -216,26 +221,26 @@ func _process_action(delta: float) -> void:
 			var count := int(current_action.get("count", 5))
 			while action_step < count and action_timer >= t_interval * float(action_step):
 				_fire_tracking_shot(
-					int(current_action.get("damage", 14)),
-					float(current_action.get("speed", 360.0))
+					int(current_action.get("damage", 12)),
+					float(current_action.get("speed", 340.0))
 				)
 				action_step += 1
 		"slash_smash":
 			if action_step == 0 and action_timer >= 0.12:
 				_try_melee_hit(
 					float(current_action.get("slash_range", 90.0)),
-					int(current_action.get("slash_damage", 28)),
+					int(current_action.get("slash_damage", 22)),
 					true
 				)
 				action_step = 1
 			if action_step == 1 and action_timer >= 0.58:
-				_aoe_hit(float(current_action.get("smash_radius", 150.0)), int(current_action.get("smash_damage", 50)))
+				_aoe_hit(float(current_action.get("smash_radius", 148.0)), int(current_action.get("smash_damage", 34)))
 				action_step = 2
 		"erase_rain":
-			var r_interval := maxf(0.08, float(current_action.get("interval", 0.18)))
+			var r_interval := maxf(0.1, float(current_action.get("interval", 0.24)))
 			var emission_count := int(floor(action_timer / r_interval))
 			while action_step < emission_count:
-				_spawn_rain_bullet(int(current_action.get("rain_damage", 14)))
+				_spawn_rain_bullet(int(current_action.get("rain_damage", 10)))
 				action_step += 1
 		_:
 			pass
@@ -332,10 +337,10 @@ func _spawn_safe_slide_hazard(damage: int, hazard_duration: float, safe_half_wid
 			"type": "safe_slide",
 			"damage": damage,
 			"duration": maxf(0.6, hazard_duration),
-			"tick_interval": 0.5,
+			"tick_interval": 0.55,
 			"tick_timer": 0.22,
 			"safe_center_x": safe_center,
-			"safe_half_width": maxf(70.0, safe_half_width),
+			"safe_half_width": maxf(90.0, safe_half_width),
 			"visual_height": 170.0,
 			"color": Color(1.0, 0.55, 0.22, 0.26)
 		}
@@ -352,10 +357,10 @@ func _spawn_erase_field_hazard(damage: int, hazard_duration: float, safe_half_wi
 			"type": "erase_field",
 			"damage": damage,
 			"duration": maxf(1.0, hazard_duration),
-			"tick_interval": 0.4,
+			"tick_interval": 0.46,
 			"tick_timer": 0.2,
 			"safe_center_x": safe_center,
-			"safe_half_width": maxf(110.0, safe_half_width),
+			"safe_half_width": maxf(130.0, safe_half_width),
 			"visual_height": 190.0,
 			"color": Color(1.0, 0.16, 0.16, 0.28)
 		}
@@ -398,6 +403,22 @@ func _deal_unblockable_damage(amount: int) -> void:
 		target.take_hazard_damage(amount, self)
 	else:
 		_deal_damage_to_player(amount)
+
+func get_autoplay_hint() -> Dictionary:
+	var hint := {
+		"hazard_active": false,
+		"safe_center_x": global_position.x
+	}
+	var best_remaining := -1.0
+	for hazard in floor_hazards:
+		var remaining := float(hazard.get("duration", 0.0))
+		if remaining <= 0.0:
+			continue
+		hint["hazard_active"] = true
+		if remaining > best_remaining:
+			best_remaining = remaining
+			hint["safe_center_x"] = float(hazard.get("safe_center_x", global_position.x))
+	return hint
 
 func _update_phase_by_hp() -> void:
 	if max_hp <= 0:

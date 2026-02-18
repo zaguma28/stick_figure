@@ -210,3 +210,57 @@
 |8|FAIL|NO|15.92|0.85|0.88|18.0|0|player_dead|3|0|53.79|
 |9|FAIL|NO|18.54|0.85|0.88|18.0|0|player_dead|3|0|87.26|
 |10|FAIL|NO|16.51|0.85|0.88|18.0|0|player_dead|5|0|58.09|
+
+## 2026-02-18T19:44:07 KPI Autorun
+- runs: 3
+- avg_floor_time: 13.00 s
+- boss_reach_rate: 0.00%
+- boss_clear_rate: 0.00%
+- final_balance: HPx0.85 DMGx0.88 RFTime:18.0 Extra:+0
+|Run|Result|BossReached|RunAvg(s)|HPx|DMGx|ReinforceTime|Extra|EndReason|Floor|HP|RealTime(s)|
+|---:|---|---|---:|---:|---:|---:|---:|---|---:|---:|---:|
+|1|FAIL|NO|13.71|0.85|0.70|0.0|0|player_dead|5|0|60.71|
+|2|FAIL|NO|6.80|0.90|0.88|18.0|1|player_dead|3|0|29.33|
+|3|FAIL|NO|18.50|0.85|0.88|18.0|0|player_dead|5|0|63.49|
+
+## 2026-02-18T19:47:19 KPI Autorun
+- runs: 2
+- avg_floor_time: 6.18 s
+- boss_reach_rate: 50.00%
+- boss_clear_rate: 0.00%
+- final_balance: HPx0.95 DMGx0.88 RFTime:18.0 Extra:+1
+|Run|Result|BossReached|RunAvg(s)|HPx|DMGx|ReinforceTime|Extra|EndReason|Floor|HP|RealTime(s)|
+|---:|---|---|---:|---:|---:|---:|---:|---|---:|---:|---:|
+|1|FAIL|NO|5.30|0.85|0.70|0.0|0|player_dead|2|0|16.78|
+|2|FAIL|YES|7.06|0.95|0.88|18.0|1|timeout|10|410|120.01|
+
+## 2026-02-18T20:06:48 KPI Autorun
+- runs: 1
+- avg_floor_time: 12.31 s
+- boss_reach_rate: 0.00%
+- boss_clear_rate: 0.00%
+- final_balance: HPx0.85 DMGx0.70 RFTime:0.0 Extra:+0
+|Run|Result|BossReached|RunAvg(s)|HPx|DMGx|ReinforceTime|Extra|EndReason|Floor|HP|RealTime(s)|
+|---:|---|---|---:|---:|---:|---:|---:|---|---:|---:|---:|
+|1|FAIL|NO|12.31|0.85|0.70|0.0|0|player_dead|8|0|75.40|
+
+## 2026-02-18T20:10:10 KPI Autorun
+- runs: 2
+- avg_floor_time: 11.32 s
+- boss_reach_rate: 50.00%
+- boss_clear_rate: 0.00%
+- final_balance: HPx0.95 DMGx0.88 RFTime:18.0 Extra:+1
+|Run|Result|BossReached|RunAvg(s)|HPx|DMGx|ReinforceTime|Extra|EndReason|Floor|HP|RealTime(s)|
+|---:|---|---|---:|---:|---:|---:|---:|---|---:|---:|---:|
+|1|FAIL|YES|9.40|0.85|0.70|0.0|0|timeout|10|422|120.02|
+|2|FAIL|NO|13.24|0.95|0.88|18.0|1|player_dead|7|0|69.63|
+
+## 2026-02-18T20:12:58 KPI Autorun
+- runs: 1
+- avg_floor_time: 10.72 s
+- boss_reach_rate: 0.00%
+- boss_clear_rate: 0.00%
+- final_balance: HPx0.85 DMGx0.70 RFTime:0.0 Extra:+0
+|Run|Result|BossReached|RunAvg(s)|HPx|DMGx|ReinforceTime|Extra|EndReason|Floor|HP|RealTime(s)|
+|---:|---|---|---:|---:|---:|---:|---:|---|---:|---:|---:|
+|1|FAIL|NO|10.72|0.85|0.70|0.0|0|timeout|7|58|120.01|

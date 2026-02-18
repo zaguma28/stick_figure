@@ -6,6 +6,7 @@ extends CanvasLayer
 @onready var floor_label: Label = $MarginContainer/VBoxContainer/FloorLabel
 @onready var floor_desc_label: Label = $MarginContainer/VBoxContainer/FloorDescLabel
 @onready var run_label: Label = $MarginContainer/VBoxContainer/RunLabel
+@onready var session_label: Label = $MarginContainer/VBoxContainer/SessionLabel
 @onready var reward_tag_label: Label = $MarginContainer/VBoxContainer/RewardTagLabel
 @onready var state_label: Label = $MarginContainer/VBoxContainer/StateLabel
 @onready var debug_label: Label = $DebugContainer/DebugLabel
@@ -45,6 +46,7 @@ func setup(player: Node) -> void:
 	_on_estus_changed(player.estus_charges, player.estus_max_charges)
 	set_floor_info(1, 10, "COMBAT", "Initializing")
 	set_run_message("")
+	set_session_metrics(0, 0.0, 0.0, 0)
 	set_reward_summary({})
 	hide_reward_options()
 
@@ -54,6 +56,12 @@ func set_floor_info(current: int, total: int, floor_type: String, floor_name: St
 
 func set_run_message(message: String) -> void:
 	run_label.text = message
+
+func set_session_metrics(run_count: int, boss_reach_rate: float, boss_clear_rate: float, boss_fail_streak: int) -> void:
+	session_label.text = (
+		"Session: runs %d | reach %.1f%% | clear %.1f%% | boss_fail_streak %d"
+		% [run_count, boss_reach_rate, boss_clear_rate, boss_fail_streak]
+	)
 
 func set_reward_summary(tag_counts: Dictionary) -> void:
 	if tag_counts.is_empty():

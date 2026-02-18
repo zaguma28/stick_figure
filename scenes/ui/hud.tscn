@@ -48,6 +48,11 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.9, 0.4, 1)
 text = ""
 
+[node name="SessionLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.82, 0.95, 1, 1)
+text = "Session: runs 0 | reach 0.0% | clear 0.0% | boss_fail_streak 0"
+
 [node name="RewardTagLabel" type="Label" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.76, 0.9, 1, 1)

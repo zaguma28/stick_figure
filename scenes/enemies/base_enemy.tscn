@@ -3,8 +3,8 @@
 [ext_resource type="Script" path="res://scenes/enemies/base_enemy.gd" id="1"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_1"]
-radius = 8.0
-height = 28.0
+radius = 6.8
+height = 23.5
 
 [node name="Enemy" type="CharacterBody2D"]
 collision_layer = 4

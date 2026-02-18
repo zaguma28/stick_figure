@@ -19,9 +19,11 @@ static var death_fx_enabled: bool = true
 @export var separation_radius: float = 30.0
 @export var separation_force: float = 360.0
 @export var separation_vertical_tolerance: float = 56.0
-@export var knockback_impulse_x: float = 220.0
-@export var knockback_impulse_y: float = 28.0
-@export var knockback_decay: float = 10.0
+@export var knockback_impulse_x: float = 140.0
+@export var knockback_impulse_y: float = 8.0
+@export var knockback_decay: float = 16.0
+@export var knockback_max_speed_x: float = 180.0
+@export var hit_recoil_duration: float = 0.08
 
 var hp: int
 var poise: float
@@ -40,6 +42,7 @@ var has_hit_this_attack: bool = false
 var poise_delay_timer: float = 0.0
 var floor_hp_scale: float = 1.0
 var floor_damage_scale: float = 1.0
+var hit_recoil_timer: float = 0.0
 
 signal enemy_died(enemy: Node2D)
 
@@ -80,6 +83,8 @@ func _update_timers(delta: float) -> void:
 		state_timer -= delta
 	if attack_cd_timer > 0:
 		attack_cd_timer -= delta
+	if hit_recoil_timer > 0:
+		hit_recoil_timer -= delta
 	if poise_delay_timer > 0:
 		poise_delay_timer -= delta
 	elif poise < max_poise and current_state != EnemyState.DOWN:
@@ -93,7 +98,10 @@ func _update_state(delta: float) -> void:
 				current_state = EnemyState.CHASE
 
 		EnemyState.CHASE:
-			_do_chase(delta)
+			if hit_recoil_timer > 0.0:
+				velocity.x = move_toward(velocity.x, 0.0, ground_accel * delta)
+			else:
+				_do_chase(delta)
 			_check_attack_range()
 
 		EnemyState.TELEGRAPH:
@@ -203,14 +211,15 @@ func _apply_gravity(delta: float) -> void:
 		velocity.y = 0.0
 
 func _apply_knockback(delta: float) -> void:
-	if knockback_vel.length() <= 0.6:
+	if absf(knockback_vel.x) <= 0.8 and absf(knockback_vel.y) <= 0.8:
 		knockback_vel = Vector2.ZERO
 		return
 	velocity.x += knockback_vel.x * delta
 	if knockback_vel.y < 0.0:
-		velocity.y += knockback_vel.y * delta
+		velocity.y = minf(velocity.y, knockback_vel.y)
 	var t := clampf(knockback_decay * delta, 0.0, 1.0)
-	knockback_vel = knockback_vel.lerp(Vector2.ZERO, t)
+	knockback_vel.x = lerpf(knockback_vel.x, 0.0, t)
+	knockback_vel.y = lerpf(knockback_vel.y, 0.0, minf(1.0, t * 1.25))
 
 func take_damage(amount: int, poise_dmg: int = 0, knockback_dir: Vector2 = Vector2.ZERO) -> void:
 	if current_state == EnemyState.DEAD:
@@ -222,7 +231,14 @@ func take_damage(amount: int, poise_dmg: int = 0, knockback_dir: Vector2 = Vecto
 		var push := knockback_dir.normalized()
 		if absf(push.x) < 0.1:
 			push.x = -facing_dir.x
-		knockback_vel = Vector2(push.x * knockback_impulse_x, -knockback_impulse_y)
+		knockback_vel.x = clampf(
+			knockback_vel.x * 0.3 + push.x * knockback_impulse_x,
+			-knockback_max_speed_x,
+			knockback_max_speed_x
+		)
+		if knockback_impulse_y > 0.0:
+			knockback_vel.y = minf(knockback_vel.y, -knockback_impulse_y)
+		hit_recoil_timer = hit_recoil_duration
 
 	if poise_dmg > 0:
 		poise -= poise_dmg
@@ -282,26 +298,26 @@ func _draw() -> void:
 	if current_state == EnemyState.CHASE and absf(velocity.x) > 10.0:
 		walk = sin(float(Time.get_ticks_msec()) * 0.018) * 3.0
 
-	draw_circle(Vector2(0, 14), 7.5, Color(0.0, 0.0, 0.0, 0.22))
+	draw_circle(Vector2(0, 12), 6.2, Color(0.0, 0.0, 0.0, 0.2))
 
-	var head := Vector2(0, -16)
-	var neck := Vector2(0, -9)
-	var pelvis := Vector2(0, 2)
-	var front_foot := Vector2(5.2 * facing + walk, 14)
-	var back_foot := Vector2(-5.0 * facing - walk * 0.7, 13)
-	var front_hand := Vector2(6.5 * facing, -2.5 + walk * 0.25)
-	var back_hand := Vector2(-6.0 * facing, -3.2 - walk * 0.22)
+	var head := Vector2(0, -13.6)
+	var neck := Vector2(0, -7.8)
+	var pelvis := Vector2(0, 1.6)
+	var front_foot := Vector2(4.6 * facing + walk, 11.5)
+	var back_foot := Vector2(-4.2 * facing - walk * 0.7, 11.0)
+	var front_hand := Vector2(5.8 * facing, -1.8 + walk * 0.24)
+	var back_hand := Vector2(-5.5 * facing, -2.6 - walk * 0.2)
 
-	draw_line(neck, pelvis, c, 2.4)
-	draw_line(pelvis, front_foot, c.darkened(0.1), 2.2)
-	draw_line(pelvis, back_foot, c.darkened(0.25), 2.2)
-	draw_line(neck, front_hand, c.darkened(0.06), 2.1)
-	draw_line(neck, back_hand, c.darkened(0.28), 2.0)
-	draw_circle(head, 4.8, c.lightened(0.08))
-	draw_circle(head + Vector2(1.8 * facing, -0.6), 0.9, Color(0.06, 0.06, 0.08))
+	draw_line(neck, pelvis, c, 2.0)
+	draw_line(pelvis, front_foot, c.darkened(0.1), 1.9)
+	draw_line(pelvis, back_foot, c.darkened(0.25), 1.85)
+	draw_line(neck, front_hand, c.darkened(0.06), 1.85)
+	draw_line(neck, back_hand, c.darkened(0.28), 1.8)
+	draw_circle(head, 3.9, c.lightened(0.08))
+	draw_circle(head + Vector2(1.5 * facing, -0.5), 0.75, Color(0.06, 0.06, 0.08))
 
 	if current_state == EnemyState.TELEGRAPH:
-		draw_arc(Vector2.ZERO, 17.0, 0.0, TAU, 32, Color(1.0, 0.72, 0.18, 0.45), 1.6)
+		draw_arc(Vector2.ZERO, 14.0, 0.0, TAU, 28, Color(1.0, 0.72, 0.18, 0.45), 1.4)
 
 	var hp_bar_width := 26.0
 	var hp_y := -27.0

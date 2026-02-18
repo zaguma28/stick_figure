@@ -16,4 +16,5 @@ desktop.ini
 
 # Local runtime logs
 godot_*.log
+.tmp*.log
 .userdata/

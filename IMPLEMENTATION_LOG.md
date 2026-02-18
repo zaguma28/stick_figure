@@ -175,6 +175,34 @@
 - Notes: 20ラン（t=6）で `reach 0% / clear 0%`、別サンプル6〜8ランで `reach 12.5〜16.7% / clear 0%`、10ラン（t=10）で再び `reach 0% / clear 0%`
 - Notes: オート操作ベンチは分散が大きく、現状は「ボス撃破率評価」指標として不安定
 
+### 2026-02-18（継続改善）
+
+- Decision: 実プレイログを `RUN_PLAY_LOG.md` へ自動追記（AUTO/MANUAL共通）
+- Rationale: KPI_AUTORUNだけでなく、手動プレイ結果も同じ粒度で比較可能にするため
+- Notes: 1ランごとに終了理由/到達フロア/実時間/フロア時間内訳を保存
+
+- Decision: HUDにセッション統計表示（runs / reach / clear / boss_fail_streak）を追加
+- Rationale: ログを開かなくても調整ループ中に現状の到達傾向を即確認するため
+- Notes: `hud.gd` に `set_session_metrics()` を追加し、`main.gd` から更新
+
+- Decision: 通常プレイ向けに「ボス連敗時の段階的アシスト」を追加
+- Rationale: 到達後の連敗が続く場合に撃破率0%から脱出しやすくするため
+- Notes: ボス開始時に連敗数に応じて回復/防御/回避/火力を小幅補正（最大Lv3）
+
+### 2026-02-18（継続改善2）
+
+- Decision: ボスに `get_autoplay_hint()` を追加し、安全地帯中心座標をオート操作へ公開
+- Rationale: `safe_slide / erase_rain` 中に安全地帯へ寄れず、到達後の生存率が下がっていたため
+- Notes: `main.gd` のオート操作は「移動目標」と「攻撃距離判定」を分離して処理
+
+- Decision: ボス基礎性能とP2/P3パターンを軽量化し、ボスにもセッション係数を反映
+- Rationale: 到達サンプルは出るが撃破0%の状態を改善するため
+- Notes: `boss_eraser.gd` の基礎HP/接触ダメージを引き下げ、`main.gd` 側でボスは floor係数ではなく session係数のみ適用
+
+- Decision: 敵被弾ノックバックを「短いリコイル中心」に再調整し、プレイヤー/敵の体格をさらにスリム化
+- Rationale: 「吹っ飛びが不自然」「棒人間の図体が大きい」という違和感に直接対応するため
+- Notes: `player.tscn` / `base_enemy.tscn` のカプセル縮小、`player.gd` / `base_enemy.gd` の描画スケールを縮小
+
 ---
 
 ## コリジョンレイヤー設計
@@ -191,7 +219,9 @@
 
 ## 既知のバグ / TODO
 
-- TODO: ボス撃破率を 5〜15% へ引き上げる（現状サンプルは到達あり/撃破0%）
-- TODO: KPI評価を「オート操作のみ」から「実プレイログ併用」へ移行し、分散の大きさを吸収する
+- TODO: ボス撃破率を 5〜15% へ引き上げる（現状は到達サンプル増加したが撃破0%）
+- TODO: `RUN_PLAY_LOG.md` を使って実プレイ20ランを収集し、オート計測分散を吸収する
 - TODO: オート計測の floor_time が目標35〜60秒より短いため、計測時補正値を再設計
+- TODO: オート計測で稀に中盤フロア timeout が発生するため、フロア停滞時のアンチスタック処理を追加
+- TODO: KPI起動引数は `-- --kpi_autorun=N --kpi_timescale=X` 形式で実行する運用を README/TODO に反映
 - TODO: 実機（通常起動）での長時間連続ランを再確認し、クラッシュ再発有無を最終判定
