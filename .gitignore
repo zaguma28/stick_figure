@@ -13,3 +13,7 @@ desktop.ini
 .vscode/
 *.swp
 *.swo
+
+# Local runtime logs
+godot_*.log
+.userdata/

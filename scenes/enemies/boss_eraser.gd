@@ -11,23 +11,23 @@ const LOOP_DURATIONS := {
 const PHASE_PATTERNS := {
 	1: [
 		{"time": 0.0, "name": "起動小弾", "type": "small_burst", "telegraph": 0.8, "duration": 0.45, "count": 3, "damage": 14, "speed": 320.0, "spread": 0.34},
-		{"time": 2.2, "name": "横薙ぎ", "type": "slash", "telegraph": 0.45, "duration": 0.4, "range": 86.0, "damage": 28},
-		{"time": 4.6, "name": "直線突進", "type": "dash_combo", "telegraph": 0.75, "duration": 0.85, "damage": 34, "dashes": 1, "dash_distance": 220.0, "dash_interval": 0.35},
-		{"time": 7.0, "name": "押しつぶし小", "type": "crush_small", "telegraph": 0.65, "duration": 0.6, "radius": 112.0, "damage": 28},
+		{"time": 2.2, "name": "横薙ぎ", "type": "slash", "telegraph": 0.45, "duration": 0.4, "range": 86.0, "damage": 24},
+		{"time": 4.6, "name": "直線突進", "type": "dash_combo", "telegraph": 0.75, "duration": 0.85, "damage": 30, "dashes": 1, "dash_distance": 220.0, "dash_interval": 0.35},
+		{"time": 7.0, "name": "押しつぶし小", "type": "crush_small", "telegraph": 0.65, "duration": 0.6, "radius": 112.0, "damage": 24},
 		{"time": 10.0, "name": "休止", "type": "rest", "telegraph": 0.0, "duration": 2.0}
 	],
 	2: [
 		{"time": 0.0, "name": "弾幕リング", "type": "ring_shot", "telegraph": 0.55, "duration": 0.45, "count": 12, "damage": 14, "speed": 300.0},
 		{"time": 3.2, "name": "安全地帯スライド", "type": "safe_slide", "telegraph": 0.4, "duration": 1.35, "damage": 10, "field_duration": 2.8, "safe_half": 105.0},
 		{"time": 7.0, "name": "追跡小弾", "type": "tracking_burst", "telegraph": 0.2, "duration": 1.25, "count": 5, "damage": 14, "speed": 360.0, "interval": 0.22},
-		{"time": 10.5, "name": "押しつぶし中", "type": "crush_mid", "telegraph": 0.75, "duration": 0.75, "radius": 132.0, "damage": 28},
-		{"time": 14.5, "name": "突進2連", "type": "dash_combo", "telegraph": 0.65, "duration": 1.35, "damage": 34, "dashes": 2, "dash_distance": 230.0, "dash_interval": 0.42}
+		{"time": 10.5, "name": "押しつぶし中", "type": "crush_mid", "telegraph": 0.75, "duration": 0.75, "radius": 132.0, "damage": 24},
+		{"time": 14.5, "name": "突進2連", "type": "dash_combo", "telegraph": 0.65, "duration": 1.35, "damage": 30, "dashes": 2, "dash_distance": 230.0, "dash_interval": 0.42}
 	],
 	3: [
-		{"time": 0.0, "name": "危険弾バースト", "type": "danger_burst", "telegraph": 0.35, "duration": 0.45, "count": 6, "damage": 38, "speed": 430.0, "spread": 0.5},
-		{"time": 3.4, "name": "斬上→叩き", "type": "slash_smash", "telegraph": 0.4, "duration": 0.95, "slash_range": 92.0, "slash_damage": 28, "smash_radius": 155.0, "smash_damage": 50},
-		{"time": 7.8, "name": "突進3連", "type": "dash_combo", "telegraph": 0.55, "duration": 1.75, "damage": 34, "dashes": 3, "dash_distance": 240.0, "dash_interval": 0.36},
-		{"time": 12.0, "name": "全消し（大技）", "type": "erase_rain", "telegraph": 0.9, "duration": 4.0, "rain_damage": 14, "interval": 0.18, "field_damage": 12, "safe_half": 140.0},
+		{"time": 0.0, "name": "危険弾バースト", "type": "danger_burst", "telegraph": 0.35, "duration": 0.45, "count": 6, "damage": 32, "speed": 410.0, "spread": 0.5},
+		{"time": 3.4, "name": "斬上→叩き", "type": "slash_smash", "telegraph": 0.4, "duration": 0.95, "slash_range": 92.0, "slash_damage": 24, "smash_radius": 155.0, "smash_damage": 42},
+		{"time": 7.8, "name": "突進3連", "type": "dash_combo", "telegraph": 0.55, "duration": 1.75, "damage": 30, "dashes": 3, "dash_distance": 240.0, "dash_interval": 0.36},
+		{"time": 12.0, "name": "全消し（大技）", "type": "erase_rain", "telegraph": 0.9, "duration": 4.0, "rain_damage": 12, "interval": 0.2, "field_damage": 10, "safe_half": 150.0},
 		{"time": 18.0, "name": "休止", "type": "rest", "telegraph": 0.0, "duration": 1.6}
 	]
 }
@@ -43,7 +43,7 @@ var telegraph_color: Color = Color(1.0, 0.86, 0.25, 0.35)
 var floor_hazards: Array[Dictionary] = []
 
 func _ready() -> void:
-	max_hp = 1250
+	max_hp = 1100
 	contact_damage = 28
 	move_speed = 92.0
 	max_poise = 220.0
@@ -241,7 +241,7 @@ func _process_action(delta: float) -> void:
 			pass
 
 func _end_action() -> void:
-	current_action.clear()
+	current_action = {}
 	current_state = EnemyState.CHASE
 	action_timer = 0.0
 	action_step = 0
@@ -415,7 +415,7 @@ func _enter_phase(next_phase: int) -> void:
 	phase_index = clampi(next_phase, 1, 3)
 	phase_timer = 0.0
 	next_action_index = 0
-	current_action.clear()
+	current_action = {}
 	action_timer = 0.0
 	action_step = 0
 	current_state = EnemyState.CHASE

@@ -149,6 +149,32 @@
 - Rationale: 高速検証時に `Engine.time_scale` が1.0へ固定される問題を防ぐため
 - Notes: `set_hitstop_enabled(false)` で計測モード中は無効化可能
 
+### 2026-02-18（KPI実測と追加調整）
+
+- Decision: `KPI_AUTORUN_LOG.md` に 20ラン計測（`--kpi_autorun=20 --kpi_timescale=6`）を実施
+- Rationale: まず現状の到達/撃破の実測値を取り、調整方向を確定するため
+- Notes: 1回目結果は `avg_floor_time 10.31s / reach 0% / clear 0%`。主因は1F〜5Fでの早期敗北
+
+- Decision: オート計測用にプレイヤー補正・回復ロジック・行動AIを段階的に調整
+- Rationale: `run_avg=0` の即死状態ではKPI比較が成立しないため
+- Notes: 調整後はボス到達サンプルが発生（例: 6ランで到達16.67%）したが、撃破0%は継続
+
+- Decision: ボスで発生した `Dictionary is in read-only state` を修正
+- Rationale: `PHASE_PATTERNS` 参照中の辞書を `clear()` していたため
+- Notes: `boss_eraser.gd` の `current_action.clear()` を `current_action = {}` へ置換
+
+- Decision: ボス火力/HPを段階的に緩和（P1〜P3ダメージとHP 1250→1100）
+- Rationale: 到達後の即敗北率を下げ、撃破率を0%から持ち上げるため
+- Notes: 予兆時間は維持して理不尽感を増やさない方針
+
+- Decision: `KPI_AUTORUN_RUN_TIMEOUT` を 50s → 120s に拡張し、ボス戦を計測範囲に含める
+- Rationale: 平均フロア時間から逆算すると50sではボス到達前に打ち切られるため
+- Notes: 到達サンプルは取得できたが、シード依存で結果の揺れが大きい
+
+- Observation: KPIサンプルの代表値
+- Notes: 20ラン（t=6）で `reach 0% / clear 0%`、別サンプル6〜8ランで `reach 12.5〜16.7% / clear 0%`、10ラン（t=10）で再び `reach 0% / clear 0%`
+- Notes: オート操作ベンチは分散が大きく、現状は「ボス撃破率評価」指標として不安定
+
 ---
 
 ## コリジョンレイヤー設計
@@ -165,6 +191,7 @@
 
 ## 既知のバグ / TODO
 
-- TODO: `--kpi_autorun=20` を実行し、`KPI_AUTORUN_LOG.md` の統計（平均時間/到達率/撃破率）を更新
-- TODO: オート操作時の1F早期敗北率が高いので、移動距離とガード/回避閾値をもう1段調整
-- TODO: 通常実行でクラッシュ再発有無を実機確認（ログ出力先を固定した起動条件含む）
+- TODO: ボス撃破率を 5〜15% へ引き上げる（現状サンプルは到達あり/撃破0%）
+- TODO: KPI評価を「オート操作のみ」から「実プレイログ併用」へ移行し、分散の大きさを吸収する
+- TODO: オート計測の floor_time が目標35〜60秒より短いため、計測時補正値を再設計
+- TODO: 実機（通常起動）での長時間連続ランを再確認し、クラッシュ再発有無を最終判定

@@ -41,10 +41,10 @@ const KPI_AUTORUN_ARG_PREFIX := "--kpi_autorun="
 const KPI_TIMESCALE_ARG_PREFIX := "--kpi_timescale="
 const KPI_AUTORUN_DEFAULT_TIMESCALE := 3.0
 const KPI_AUTORUN_RESTART_DELAY := 0.4
-const KPI_AUTORUN_RUN_TIMEOUT := 50.0
-const KPI_AUTORUN_HP_MULT := 1.45
-const KPI_AUTORUN_DAMAGE_MULT := 1.3
-const KPI_AUTORUN_STAMINA_REGEN_BONUS := 8.0
+const KPI_AUTORUN_RUN_TIMEOUT := 120.0
+const KPI_AUTORUN_HP_MULT := 5.0
+const KPI_AUTORUN_DAMAGE_MULT := 2.4
+const KPI_AUTORUN_STAMINA_REGEN_BONUS := 18.0
 
 const REWARD_POOL := [
 	{
@@ -199,6 +199,7 @@ var autoplay_guard_hold: float = 0.0
 var autoplay_skill1_cd: float = 0.0
 var autoplay_skill2_cd: float = 0.0
 var run_start_msec: int = 0
+var run_end_reason: String = ""
 
 func _ready() -> void:
 	randomize()
@@ -267,6 +268,7 @@ func _start_run() -> void:
 	session_run_count += 1
 	run_finished = false
 	run_start_msec = Time.get_ticks_msec()
+	run_end_reason = ""
 	current_floor = 1
 	floor_phase = "idle"
 	run_boss_reached = false
@@ -297,8 +299,15 @@ func _prepare_player_for_kpi_autorun() -> void:
 	player.hp = player.max_hp
 	player.stamina_regen += KPI_AUTORUN_STAMINA_REGEN_BONUS
 	player.bonus_damage_multiplier *= KPI_AUTORUN_DAMAGE_MULT
+	player.guard_reduction = maxf(player.guard_reduction, 0.72)
+	player.roll_iframes += 0.08
+	player.iframes_duration += 0.12
+	player.estus_heal = maxi(player.estus_heal, int(round(0.34 * float(player.max_hp))))
+	player.estus_max_charges = maxi(player.estus_max_charges, 5)
+	player.estus_charges = player.estus_max_charges
 	player.emit_signal("hp_changed", player.hp, player.max_hp)
 	player.emit_signal("stamina_changed", player.stamina, player.max_stamina)
+	player.emit_signal("estus_changed", player.estus_charges, player.estus_max_charges)
 
 func _setup_kpi_autorun_from_args() -> void:
 	var args := OS.get_cmdline_user_args()
@@ -314,7 +323,7 @@ func _setup_kpi_autorun_from_args() -> void:
 		elif arg.begins_with(KPI_TIMESCALE_ARG_PREFIX):
 			var scale_text := arg.trim_prefix(KPI_TIMESCALE_ARG_PREFIX)
 			if scale_text.is_valid_float():
-				parsed_timescale = clampf(scale_text.to_float(), 1.0, 6.0)
+				parsed_timescale = clampf(scale_text.to_float(), 1.0, 10.0)
 	if target_runs <= 0:
 		return
 	kpi_autorun_enabled = true
@@ -322,6 +331,10 @@ func _setup_kpi_autorun_from_args() -> void:
 	kpi_autorun_completed_runs = 0
 	kpi_autorun_results.clear()
 	kpi_autorun_time_scale = parsed_timescale
+	session_enemy_hp_multiplier = 0.85
+	session_enemy_damage_multiplier = 0.70
+	session_reinforcement_trigger_time = 0.0
+	session_extra_reinforcement_count = 0
 	Engine.time_scale = kpi_autorun_time_scale
 	if player and player.has_method("set_hitstop_enabled"):
 		player.set_hitstop_enabled(false)
@@ -345,6 +358,7 @@ func _process_kpi_autorun(delta: float) -> void:
 		return
 	if _current_run_elapsed_real() >= KPI_AUTORUN_RUN_TIMEOUT:
 		player.emit_signal("debug_log", "AUTORUN TIMEOUT %.1fs" % KPI_AUTORUN_RUN_TIMEOUT)
+		run_end_reason = "timeout"
 		_fail_run()
 		return
 	if floor_phase == "reward_select":
@@ -424,54 +438,60 @@ func _autoplay_drive_player() -> void:
 
 	var dx: float = enemy.global_position.x - player.global_position.x
 	var abs_dx: float = absf(dx)
-	var preferred_distance: float = 86.0
+	var preferred_distance: float = 122.0
 	if str(current_floor_data.get("type", "")) == "boss":
-		preferred_distance = 118.0
+		preferred_distance = 148.0
 	var move_axis: float = 0.0
-	if abs_dx > preferred_distance + 24.0:
-		move_axis = signf(dx)
-	elif abs_dx < preferred_distance - 20.0:
-		move_axis = -signf(dx) * 0.55
+	if abs_dx > preferred_distance + 36.0:
+		move_axis = signf(dx) * 0.85
+	elif abs_dx < preferred_distance - 30.0:
+		move_axis = -signf(dx) * 0.75
 	player.set_virtual_move_axis(move_axis)
 
-	var projectile_pressure := _count_projectiles_near_player(132.0)
-	var crowd_count := _count_enemies_near_player(140.0)
+	var projectile_pressure := _count_projectiles_near_player(260.0)
+	var close_projectiles := _count_projectiles_near_player(140.0)
+	var crowd_count := _count_enemies_near_player(170.0)
 
-	if player.max_hp > 0 and float(player.hp) / float(player.max_hp) <= 0.42:
-		if player.estus_charges > 0 and autoplay_estus_cd <= 0.0 and abs_dx > 140.0:
+	if player.max_hp > 0 and float(player.hp) / float(player.max_hp) <= 0.72:
+		if player.estus_charges > 0 and autoplay_estus_cd <= 0.0 and abs_dx > 96.0 and close_projectiles == 0:
 			player.ai_estus()
-			autoplay_estus_cd = 2.3
+			autoplay_estus_cd = 2.0
 			return
 
-	if projectile_pressure >= 2 and autoplay_roll_cd <= 0.0:
+	if close_projectiles >= 1 and autoplay_roll_cd <= 0.0:
 		player.ai_roll()
-		autoplay_roll_cd = 0.72
+		autoplay_roll_cd = 0.56
 		return
 
-	if projectile_pressure >= 1 and autoplay_guard_cd <= 0.0 and abs_dx > 110.0:
+	if projectile_pressure >= 1 and autoplay_guard_cd <= 0.0:
 		player.ai_guard_start()
-		autoplay_guard_hold = 0.24
-		autoplay_guard_cd = 0.82
+		autoplay_guard_hold = 0.42
+		autoplay_guard_cd = 0.64
 	else:
 		if autoplay_guard_hold <= 0.0:
 			player.ai_guard_end()
 
-	if abs_dx <= 88.0 and autoplay_attack_cd <= 0.0:
+	if crowd_count >= 3 and autoplay_roll_cd <= 0.0:
+		player.ai_roll()
+		autoplay_roll_cd = 0.66
+		return
+
+	if abs_dx <= 112.0 and autoplay_attack_cd <= 0.0:
 		player.ai_guard_end()
 		player.ai_attack()
-		autoplay_attack_cd = 0.18
+		autoplay_attack_cd = 0.11
 		return
 
-	if abs_dx <= 126.0 and autoplay_skill1_cd <= 0.0:
+	if abs_dx <= 168.0 and autoplay_skill1_cd <= 0.0:
 		player.ai_guard_end()
 		player.ai_skill1()
-		autoplay_skill1_cd = 4.5
+		autoplay_skill1_cd = 3.1
 		return
 
-	if abs_dx <= 160.0 and crowd_count >= 2 and autoplay_skill2_cd <= 0.0:
+	if abs_dx <= 220.0 and crowd_count >= 2 and autoplay_skill2_cd <= 0.0:
 		player.ai_guard_end()
 		player.ai_skill2()
-		autoplay_skill2_cd = 7.4
+		autoplay_skill2_cd = 4.9
 
 func _get_nearest_alive_enemy() -> BaseEnemy:
 	var nearest: BaseEnemy = null
@@ -532,6 +552,8 @@ func _start_floor(floor_number: int) -> void:
 	floor_start_msec = Time.get_ticks_msec()
 	var floor_type: String = floor_data.get("type", "combat")
 	var floor_name: String = floor_data.get("name", "")
+	if kpi_autorun_enabled and floor_type == "boss":
+		_prepare_player_for_kpi_boss_attempt()
 	_update_hud_floor(floor_type, floor_name)
 	match floor_type:
 		"combat", "boss":
@@ -553,6 +575,17 @@ func _start_floor(floor_number: int) -> void:
 			push_warning("Unknown floor type: %s" % floor_type)
 			floor_phase = "event_wait"
 			floor_timer = 0.5
+
+func _prepare_player_for_kpi_boss_attempt() -> void:
+	if not player:
+		return
+	player.hp = player.max_hp
+	player.stamina = player.max_stamina
+	player.estus_charges = player.estus_max_charges
+	player.bonus_damage_multiplier *= 1.35
+	player.emit_signal("hp_changed", player.hp, player.max_hp)
+	player.emit_signal("stamina_changed", player.stamina, player.max_stamina)
+	player.emit_signal("estus_changed", player.estus_charges, player.estus_max_charges)
 
 func _spawn_floor_enemies(enemy_keys: Array) -> void:
 	var count := enemy_keys.size()
@@ -609,7 +642,10 @@ func _apply_floor_scaling(node: Node) -> void:
 		enemy.call_deferred("apply_floor_scaling", hp_scale, dmg_scale)
 
 func _apply_event_floor_effect() -> void:
-	var heal_amount := mini(20, player.max_hp - player.hp)
+	var heal_cap := 20
+	if kpi_autorun_enabled:
+		heal_cap = maxi(heal_cap, int(round(float(player.max_hp) * 0.4)))
+	var heal_amount := mini(heal_cap, player.max_hp - player.hp)
 	player.hp += heal_amount
 	player.stamina = player.max_stamina
 	player.emit_signal("hp_changed", player.hp, player.max_hp)
@@ -679,6 +715,7 @@ func _go_to_next_floor() -> void:
 
 func _finish_run() -> void:
 	run_finished = true
+	run_end_reason = "clear"
 	floor_phase = "finished"
 	_clear_current_floor_nodes()
 	if hud.has_method("hide_reward_options"):
@@ -690,6 +727,8 @@ func _finish_run() -> void:
 
 func _fail_run() -> void:
 	run_finished = true
+	if run_end_reason == "":
+		run_end_reason = "player_dead"
 	floor_phase = "finished"
 	_clear_current_floor_nodes()
 	if hud.has_method("hide_reward_options"):
@@ -993,7 +1032,11 @@ func _record_kpi_autorun_result(run_clear: bool, run_avg: float, boss_reach_rate
 			"hp_mult": session_enemy_hp_multiplier,
 			"dmg_mult": session_enemy_damage_multiplier,
 			"reinforce_time": session_reinforcement_trigger_time,
-			"reinforce_extra": session_extra_reinforcement_count
+			"reinforce_extra": session_extra_reinforcement_count,
+			"run_elapsed_real_s": _current_run_elapsed_real(),
+			"final_floor": current_floor,
+			"final_hp": player.hp if player else 0,
+			"end_reason": run_end_reason
 		}
 	)
 	player.emit_signal(
@@ -1048,11 +1091,11 @@ func _append_kpi_autorun_log(avg_floor_time: float, reach_rate: float, clear_rat
 		session_reinforcement_trigger_time,
 		session_extra_reinforcement_count
 	])
-	lines.append("|Run|Result|BossReached|RunAvg(s)|HPx|DMGx|ReinforceTime|Extra|")
-	lines.append("|---:|---|---|---:|---:|---:|---:|---:|")
+	lines.append("|Run|Result|BossReached|RunAvg(s)|HPx|DMGx|ReinforceTime|Extra|EndReason|Floor|HP|RealTime(s)|")
+	lines.append("|---:|---|---|---:|---:|---:|---:|---:|---|---:|---:|---:|")
 	for result in kpi_autorun_results:
 		lines.append(
-			"|%d|%s|%s|%.2f|%.2f|%.2f|%.1f|%d|"
+			"|%d|%s|%s|%.2f|%.2f|%.2f|%.1f|%d|%s|%d|%d|%.2f|"
 			% [
 				int(result.get("run_index", 0)),
 				"CLEAR" if bool(result.get("run_clear", false)) else "FAIL",
@@ -1061,7 +1104,11 @@ func _append_kpi_autorun_log(avg_floor_time: float, reach_rate: float, clear_rat
 				float(result.get("hp_mult", 1.0)),
 				float(result.get("dmg_mult", 1.0)),
 				float(result.get("reinforce_time", REINFORCEMENT_TRIGGER_TIME)),
-				int(result.get("reinforce_extra", 0))
+				int(result.get("reinforce_extra", 0)),
+				str(result.get("end_reason", "")),
+				int(result.get("final_floor", 0)),
+				int(result.get("final_hp", 0)),
+				float(result.get("run_elapsed_real_s", 0.0))
 			]
 		)
 	var existing := ""
