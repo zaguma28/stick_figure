@@ -1,9 +1,11 @@
-[gd_scene load_steps=5 format=3 uid="uid://cd1hgsh26qx48"]
+[gd_scene load_steps=7 format=3 uid="uid://cd1hgsh26qx48"]
 
 [ext_resource type="Script" uid="uid://ymk8147k1r18" path="res://scenes/main.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/player/player.tscn" id="2"]
 [ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="3"]
-[ext_resource type="PackedScene" path="res://scenes/ui/virtual_joystick.tscn" id="4"]
+[ext_resource type="PackedScene" path="res://scenes/ui/mobile_controls.tscn" id="4"]
+[ext_resource type="PackedScene" path="res://scenes/ui/dialogue_overlay.tscn" id="5"]
+[ext_resource type="Script" path="res://addons/stick_souls_pixel/smooth_pixel_subviewport_container.gd" id="6"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1")
@@ -15,10 +17,13 @@ position = Vector2(360, 640)
 
 [node name="HUD" parent="." instance=ExtResource("3")]
 
-[node name="VirtualJoystick" parent="." instance=ExtResource("4")]
-layout_mode = 3
-anchors_preset = 0
-offset_left = 24.0
-offset_top = 544.0
-offset_right = 184.0
-offset_bottom = 704.0
+[node name="MobileControls" parent="." instance=ExtResource("4")]
+
+[node name="DialogueOverlay" parent="." instance=ExtResource("5")]
+
+[node name="PixelSnapper" type="SubViewportContainer" parent="."]
+visible = false
+script = ExtResource("6")
+snap_enabled = true
+pixel_snap_step = 1.0
+target_camera_path = NodePath("../Player/Camera2D")

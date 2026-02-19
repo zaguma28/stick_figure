@@ -3,7 +3,8 @@ extends Node2D
 @onready var player = $Player
 @onready var hud = $HUD
 @onready var camera: Camera2D = $Player/Camera2D
-@onready var virtual_joystick: Control = $VirtualJoystick
+@onready var mobile_controls: Control = $MobileControls
+@onready var pixel_snapper: SubViewportContainer = $PixelSnapper
 
 var enemy_scene: PackedScene = preload("res://scenes/enemies/base_enemy.tscn")
 var charger_script: GDScript = preload("res://scenes/enemies/charger.gd")
@@ -16,6 +17,7 @@ var hunter_script: GDScript = preload("res://scenes/enemies/hunter_drone.gd")
 var boss_script: GDScript = preload("res://scenes/enemies/boss_eraser.gd")
 var impact_overlay_script: GDScript = preload("res://scenes/effects/impact_overlay.gd")
 var world_backdrop_script: GDScript = preload("res://scenes/effects/world_backdrop.gd")
+const WEIGHTED_SELECTOR := preload("res://addons/stick_souls_ai/weighted_selector.gd")
 const ENABLE_SCREEN_IMPACT_FX := false
 
 const TOTAL_FLOORS := 10
@@ -62,7 +64,7 @@ const KPI_AUTORUN_RUN_TIMEOUT := 120.0
 const KPI_AUTORUN_HP_MULT := 5.0
 const KPI_AUTORUN_DAMAGE_MULT := 2.4
 const KPI_AUTORUN_STAMINA_REGEN_BONUS := 18.0
-const RUN_PLAY_LOG_PATH := "res://RUN_PLAY_LOG.md"
+const RUN_PLAY_LOG_PATH := "user://RUN_PLAY_LOG.md"
 const BOSS_ASSIST_MAX_LEVEL := 3
 const BOSS_SECOND_WIND_MIN_ASSIST_LEVEL := 2
 const BOSS_SECOND_WIND_BASE_HP_RATIO := 0.32
@@ -250,16 +252,19 @@ var floor_stall_active: bool = false
 var floor_stall_pulse_timer: float = 0.0
 var floor_stall_level: int = 0
 var current_floor_mutator: Dictionary = {}
+var pixel_snap_enabled: bool = true
+var pixel_snap_step: float = 1.0
 
 func _ready() -> void:
 	randomize()
 	RenderingServer.set_default_clear_color(Color(0.08, 0.08, 0.12))
+	_apply_pixel_snap_settings()
 	player.add_to_group("player")
 	hud.setup(player)
 	if hud and hud.has_signal("reward_selected"):
 		hud.reward_selected.connect(_on_reward_selected)
-	if virtual_joystick and virtual_joystick.has_signal("stick_input"):
-		virtual_joystick.stick_input.connect(_on_stick_input)
+	if mobile_controls and mobile_controls.has_signal("stick_input"):
+		mobile_controls.stick_input.connect(_on_stick_input)
 	if ENABLE_SCREEN_IMPACT_FX and player and player.has_signal("impact_fx_requested"):
 		player.impact_fx_requested.connect(_on_player_impact_fx_requested)
 	if ENABLE_SCREEN_IMPACT_FX:
@@ -270,6 +275,7 @@ func _ready() -> void:
 	player.position = PLAYER_START
 	player.velocity = Vector2.ZERO
 	queue_redraw()
+	_load_persistent_progress()
 	_setup_kpi_autorun_from_args()
 	_start_run()
 
@@ -308,6 +314,32 @@ func _unhandled_input(event: InputEvent) -> void:
 	var key_event = event as InputEventKey
 	if not key_event.pressed or key_event.echo:
 		return
+	if key_event.keycode == KEY_P:
+		pixel_snap_enabled = not pixel_snap_enabled
+		_apply_pixel_snap_settings()
+		_persist_pixel_snap_settings()
+		player.emit_signal(
+			"debug_log",
+			"PIXEL SNAP: %s (%.1fpx)" % ["ON" if pixel_snap_enabled else "OFF", pixel_snap_step]
+		)
+		get_viewport().set_input_as_handled()
+		return
+	if key_event.keycode == KEY_O:
+		pixel_snap_step = _next_pixel_snap_step(pixel_snap_step)
+		_apply_pixel_snap_settings()
+		_persist_pixel_snap_settings()
+		player.emit_signal("debug_log", "PIXEL SNAP STEP: %.1fpx" % pixel_snap_step)
+		get_viewport().set_input_as_handled()
+		return
+	if key_event.keycode == KEY_T and has_node("/root/InputHub"):
+		var input_hub = get_node("/root/InputHub")
+		if input_hub.has_method("are_touch_controls_enabled") and input_hub.has_method("set_touch_controls_enabled"):
+			var enabled = not bool(input_hub.are_touch_controls_enabled())
+			input_hub.set_touch_controls_enabled(enabled, true)
+			_apply_touch_controls_visibility()
+			player.emit_signal("debug_log", "TOUCH UI: %s" % ("ON" if enabled else "OFF"))
+			get_viewport().set_input_as_handled()
+			return
 	if run_finished:
 		if key_event.keycode == KEY_R:
 			_start_run()
@@ -329,6 +361,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _start_run() -> void:
 	session_run_count += 1
+	if has_node("/root/SaveManager"):
+		var save_manager = get_node("/root/SaveManager")
+		save_manager.set_progress("run_count", session_run_count, false)
 	run_finished = false
 	run_start_msec = Time.get_ticks_msec()
 	run_start_datetime = Time.get_datetime_string_from_system()
@@ -357,6 +392,7 @@ func _start_run() -> void:
 	autoplay_skill1_cd = 0.0
 	autoplay_skill2_cd = 0.0
 	_update_session_metrics_display()
+	_apply_touch_controls_visibility()
 	_start_floor(current_floor)
 
 func _prepare_player_for_kpi_autorun() -> void:
@@ -408,11 +444,68 @@ func _setup_kpi_autorun_from_args() -> void:
 	if player and player.has_method("set_combat_fx_enabled"):
 		player.set_combat_fx_enabled(false)
 	BaseEnemy.death_fx_enabled = false
-	if virtual_joystick:
-		virtual_joystick.visible = false
+	if mobile_controls:
+		if mobile_controls.has_method("set_enabled"):
+			mobile_controls.call("set_enabled", false)
+		else:
+			mobile_controls.visible = false
 	if hud:
 		hud.visible = false
 	player.emit_signal("debug_log", "KPI AUTORUN START x%d (time_scale %.1f)" % [kpi_autorun_target_runs, kpi_autorun_time_scale])
+
+func _load_persistent_progress() -> void:
+	if not has_node("/root/SaveManager"):
+		return
+	var save_manager = get_node("/root/SaveManager")
+	pixel_snap_enabled = bool(save_manager.get_setting("pixel_snap_enabled", true))
+	pixel_snap_step = _normalize_pixel_snap_step(float(save_manager.get_setting("pixel_snap_step", 1.0)))
+	_apply_pixel_snap_settings()
+	session_run_count = int(save_manager.get_progress("run_count", 0))
+	session_boss_reach_count = int(save_manager.get_progress("boss_reach_count", 0))
+	session_boss_clear_count = int(save_manager.get_progress("clear_count", 0))
+	session_boss_fail_streak = int(save_manager.get_progress("boss_fail_streak", 0))
+	_update_session_metrics_display()
+	var discovered: Array = save_manager.get_discovered_rewards()
+	if not discovered.is_empty():
+		player.emit_signal("debug_log", "META: 既知報酬 %d" % discovered.size())
+
+func _persist_progress(run_clear: bool) -> void:
+	if not has_node("/root/SaveManager"):
+		return
+	var save_manager = get_node("/root/SaveManager")
+	var best_floor = maxi(int(save_manager.get_progress("best_floor", 1)), current_floor)
+	save_manager.set_progress("run_count", session_run_count, false)
+	save_manager.set_progress("boss_reach_count", session_boss_reach_count, false)
+	save_manager.set_progress("clear_count", session_boss_clear_count, false)
+	save_manager.set_progress("boss_fail_streak", session_boss_fail_streak, false)
+	save_manager.set_progress("best_floor", best_floor, false)
+	save_manager.record_last_run(
+		{
+			"timestamp": Time.get_datetime_string_from_system(),
+			"run_clear": run_clear,
+			"final_floor": current_floor,
+			"boss_reached": run_boss_reached,
+			"end_reason": run_end_reason,
+			"run_elapsed_real_s": _current_run_elapsed_real(),
+			"discovered_rewards": save_manager.get_discovered_rewards()
+		},
+		false
+	)
+	save_manager.save()
+
+func _apply_touch_controls_visibility() -> void:
+	if not mobile_controls:
+		return
+	if kpi_autorun_enabled:
+		if mobile_controls.has_method("set_enabled"):
+			mobile_controls.call("set_enabled", false)
+		else:
+			mobile_controls.visible = false
+		return
+	if mobile_controls.has_method("set_enabled"):
+		mobile_controls.call("set_enabled", true)
+	else:
+		mobile_controls.visible = true
 
 func _process_kpi_autorun(delta: float) -> void:
 	_autoplay_tick_timers(delta)
@@ -668,8 +761,10 @@ func _start_floor(floor_number: int) -> void:
 					session_boss_reach_count += 1
 				if run_boss_assist_level > 0:
 					_set_run_message("10F: 消しゴム神 出現 (ASSIST Lv%d)" % run_boss_assist_level)
+					_show_floor_dialogue("BOSS", ["ASSIST Lv%d で挑戦開始" % run_boss_assist_level, "消しゴム神を撃破せよ"], true)
 				else:
 					_set_run_message("10F: 消しゴム神 出現")
+					_show_floor_dialogue("BOSS", ["消しゴム神 出現", "予兆を見て回避して反撃"], true)
 			else:
 				var mut_name = str(current_floor_mutator.get("name", ""))
 				if mut_name == "":
@@ -681,6 +776,7 @@ func _start_floor(floor_number: int) -> void:
 			floor_phase = "event_wait"
 			floor_timer = EVENT_FLOOR_DURATION
 			_set_run_message("F%d 事件: %s" % [current_floor, event_label])
+			_show_floor_dialogue("EVENT F%d" % current_floor, [event_label], true)
 		_:
 			push_warning("Unknown floor type: %s" % floor_type)
 			floor_phase = "event_wait"
@@ -1026,8 +1122,10 @@ func _finish_run() -> void:
 		hud.hide_reward_options()
 	session_boss_clear_count += 1
 	_set_run_message("RUN CLEAR! 10F 完走 (Rで再挑戦)")
+	_show_floor_dialogue("RUN CLEAR", ["10F 完走", "Rキーで再挑戦"], true)
 	player.emit_signal("debug_log", "RUN CLEAR")
 	_log_kpi_summary(true)
+	_persist_progress(true)
 
 func _fail_run() -> void:
 	run_finished = true
@@ -1042,8 +1140,10 @@ func _fail_run() -> void:
 	if hud.has_method("hide_reward_options"):
 		hud.hide_reward_options()
 	_set_run_message("RUN FAILED (Rで再挑戦)")
+	_show_floor_dialogue("RUN FAILED", ["F%d で敗北" % current_floor, "Rキーで再挑戦"], true)
 	player.emit_signal("debug_log", "RUN FAILED at F%d" % current_floor)
 	_log_kpi_summary(false)
+	_persist_progress(false)
 
 func _try_trigger_boss_second_wind() -> bool:
 	if run_boss_second_wind_used:
@@ -1110,6 +1210,9 @@ func _apply_reward(reward: Dictionary) -> void:
 	var reward_id: String = str(reward.get("id", ""))
 	if reward_id != "":
 		owned_reward_ids[reward_id] = true
+		if has_node("/root/SaveManager"):
+			var save_manager = get_node("/root/SaveManager")
+			save_manager.remember_reward(reward_id, false)
 	var tags: Array = reward.get("tags", [])
 	for tag in tags:
 		var key = str(tag)
@@ -1196,19 +1299,7 @@ func _pick_weighted_unique(pool: Array, count: int) -> Array[Dictionary]:
 	return picks
 
 func _pick_weighted_index(pool: Array) -> int:
-	if pool.is_empty():
-		return -1
-	var total_weight = 0.0
-	for reward in pool:
-		total_weight += _reward_weight(reward)
-	if total_weight <= 0.0:
-		return randi_range(0, pool.size() - 1)
-	var roll = randf() * total_weight
-	for i in range(pool.size()):
-		roll -= _reward_weight(pool[i])
-		if roll <= 0.0:
-			return i
-	return pool.size() - 1
+	return WEIGHTED_SELECTOR.pick_weighted_index(pool, Callable(self, "_reward_weight"))
 
 func _reward_weight(reward: Dictionary) -> float:
 	var tags: Array = reward.get("tags", [])
@@ -1483,7 +1574,7 @@ func _finalize_kpi_autorun() -> void:
 	get_tree().quit()
 
 func _append_kpi_autorun_log(avg_floor_time: float, reach_rate: float, clear_rate: float) -> void:
-	var path = "res://KPI_AUTORUN_LOG.md"
+	var path = "user://KPI_AUTORUN_LOG.md"
 	var now = Time.get_datetime_string_from_system()
 	var lines: Array[String] = []
 	lines.append("## %s KPI Autorun" % now)
@@ -1539,6 +1630,13 @@ func _set_run_message(message: String) -> void:
 	if hud.has_method("set_run_message"):
 		hud.set_run_message(message)
 	player.emit_signal("debug_log", message)
+
+func _show_floor_dialogue(title: String, lines: Array[String], clear_existing: bool = false) -> void:
+	if not has_node("/root/DialogueService"):
+		return
+	var dialogue = get_node("/root/DialogueService")
+	if dialogue.has_method("show_lines"):
+		dialogue.call("show_lines", title, lines, 1.6, clear_existing)
 
 func _update_threat_warning() -> void:
 	if not hud or not hud.has_method("set_threat_warning"):
@@ -1697,6 +1795,37 @@ func _setup_camera() -> void:
 	camera.limit_bottom = int(LEVEL_BOTTOM)
 	camera.position_smoothing_enabled = true
 	camera.position_smoothing_speed = 6.0
+
+func _normalize_pixel_snap_step(step: float) -> float:
+	if step <= 0.75:
+		return 0.5
+	if step <= 1.5:
+		return 1.0
+	return 2.0
+
+func _next_pixel_snap_step(step: float) -> float:
+	var current = _normalize_pixel_snap_step(step)
+	if is_equal_approx(current, 0.5):
+		return 1.0
+	if is_equal_approx(current, 1.0):
+		return 2.0
+	return 0.5
+
+func _apply_pixel_snap_settings() -> void:
+	pixel_snap_step = _normalize_pixel_snap_step(pixel_snap_step)
+	if not pixel_snapper:
+		return
+	pixel_snapper.visible = false
+	pixel_snapper.set("snap_enabled", pixel_snap_enabled)
+	pixel_snapper.set("pixel_snap_step", pixel_snap_step)
+	pixel_snapper.set("target_camera_path", NodePath("../Player/Camera2D"))
+
+func _persist_pixel_snap_settings() -> void:
+	if not has_node("/root/SaveManager"):
+		return
+	var save_manager = get_node("/root/SaveManager")
+	save_manager.set_setting("pixel_snap_enabled", pixel_snap_enabled, true)
+	save_manager.set_setting("pixel_snap_step", pixel_snap_step, true)
 
 func _setup_impact_overlay() -> void:
 	if not ENABLE_SCREEN_IMPACT_FX:

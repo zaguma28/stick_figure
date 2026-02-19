@@ -168,4 +168,4 @@ theme_override_constants/margin_bottom = 8
 [node name="KeymapLabel" type="Label" parent="KeymapContainer"]
 layout_mode = 2
 horizontal_alignment = 1
-text = "WASD:移動  J:攻撃(連打コンボ)  K:回避  L:ガード/パリィ  H:エスト  1/2:スキル  報酬:1/2/3 or TAP  R:リトライ"
+text = "Keyboard: WASD/J/K/L/H/1/2  |  Gamepad: LS/A/B/X/Y  |  Mobile: 左スティック+右ボタン  |  Reward: 1/2/3 or TAP  |  T:TouchUI  R:Retry"

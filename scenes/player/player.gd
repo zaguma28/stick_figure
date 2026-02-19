@@ -42,6 +42,10 @@ enum State {
 @export var max_air_rolls: int = 1
 @export var silhouette_scale: float = 1.14
 @export var show_combat_trails: bool = true
+@export var stylish_afterimages: bool = true
+@export var stylish_afterimage_interval: float = 0.03
+@export var stylish_afterimage_lifetime: float = 0.14
+@export var stylish_ring_boost: float = 1.0
 
 var attack_damage = [12, 16, 24]
 var attack_stamina = [20.0, 24.0, 32.0]
@@ -56,6 +60,8 @@ var skill2_poise_damage: int = 12
 @export var roll_iframes: float = 0.24
 @export var roll_recovery: float = 0.14
 @export var roll_distance: float = 168.0
+@export var in_place_dodge_iframes: float = 0.16
+@export var in_place_dodge_recovery: float = 0.16
 
 @export var parry_stamina: float = 24.0
 @export var parry_window: float = 0.18
@@ -99,6 +105,20 @@ var swing_fx_heavy: bool = false
 var slash_chain_spawn_timer: float = 0.0
 var slash_chain_phase: int = 0
 var slash_chain_trails: Array[Dictionary] = []
+var roll_dir_x: float = 1.0
+var roll_start_speed: float = 0.0
+var roll_stationary: bool = false
+var style_afterimage_timer: float = 0.0
+var style_afterimages: Array[Dictionary] = []
+var style_ring_timer: float = 0.0
+var style_ring_duration: float = 0.0
+var style_ring_radius: float = 0.0
+var style_ring_color: Color = Color(1.0, 0.95, 0.8, 0.0)
+var dodge_success_timer: float = 0.0
+var dodge_success_duration: float = 0.18
+var parry_success_timer: float = 0.0
+var parry_success_duration: float = 0.28
+var defense_feedback_cooldown: float = 0.0
 var camera_shake_timer: float = 0.0
 var camera_shake_duration: float = 0.0
 var camera_shake_strength: float = 0.0
@@ -153,10 +173,16 @@ func reset_for_new_run() -> void:
 	max_air_rolls = 1
 	silhouette_scale = 1.14
 	show_combat_trails = true
+	stylish_afterimages = true
+	stylish_afterimage_interval = 0.03
+	stylish_afterimage_lifetime = 0.14
+	stylish_ring_boost = 1.0
 	roll_stamina = 28.0
 	roll_iframes = 0.24
 	roll_recovery = 0.14
 	roll_distance = 168.0
+	in_place_dodge_iframes = 0.16
+	in_place_dodge_recovery = 0.16
 	parry_stamina = 24.0
 	parry_window = 0.18
 	parry_fail_stagger = 0.35
@@ -209,6 +235,20 @@ func reset_for_new_run() -> void:
 	slash_chain_spawn_timer = 0.0
 	slash_chain_phase = 0
 	slash_chain_trails.clear()
+	roll_dir_x = 1.0
+	roll_start_speed = 0.0
+	roll_stationary = false
+	style_afterimage_timer = 0.0
+	style_afterimages.clear()
+	style_ring_timer = 0.0
+	style_ring_duration = 0.0
+	style_ring_radius = 0.0
+	style_ring_color = Color(1.0, 0.95, 0.8, 0.0)
+	dodge_success_timer = 0.0
+	dodge_success_duration = 0.18
+	parry_success_timer = 0.0
+	parry_success_duration = 0.28
+	defense_feedback_cooldown = 0.0
 	camera_shake_timer = 0.0
 	camera_shake_duration = 0.0
 	camera_shake_strength = 0.0
@@ -258,14 +298,50 @@ func _update_timers(delta: float) -> void:
 	if swing_fx_timer > 0:
 		swing_fx_timer = maxf(0.0, swing_fx_timer - delta)
 	_update_slash_chain(delta)
+	_update_style_afterimages(delta)
+	if style_ring_timer > 0.0:
+		style_ring_timer = maxf(0.0, style_ring_timer - delta)
+	if dodge_success_timer > 0.0:
+		dodge_success_timer = maxf(0.0, dodge_success_timer - delta)
+	if parry_success_timer > 0.0:
+		parry_success_timer = maxf(0.0, parry_success_timer - delta)
+	if defense_feedback_cooldown > 0.0:
+		defense_feedback_cooldown = maxf(0.0, defense_feedback_cooldown - delta)
 	if skill1_cd > 0:
 		skill1_cd -= delta
 	if skill2_cd > 0:
 		skill2_cd -= delta
 	_update_camera_shake(delta)
 
+func _input_hub() -> Node:
+	return get_node_or_null("/root/InputHub")
+
+func _input_axis(negative_action: String, positive_action: String) -> float:
+	var hub = _input_hub()
+	if hub and hub.has_method("get_axis"):
+		return float(hub.get_axis(negative_action, positive_action))
+	return Input.get_axis(negative_action, positive_action)
+
+func _action_pressed(action: String) -> bool:
+	var hub = _input_hub()
+	if hub and hub.has_method("is_action_pressed"):
+		return bool(hub.is_action_pressed(action))
+	return Input.is_action_pressed(action)
+
+func _action_just_pressed(action: String) -> bool:
+	var hub = _input_hub()
+	if hub and hub.has_method("is_action_just_pressed"):
+		return bool(hub.is_action_just_pressed(action))
+	return Input.is_action_just_pressed(action)
+
+func _action_just_released(action: String) -> bool:
+	var hub = _input_hub()
+	if hub and hub.has_method("is_action_just_released"):
+		return bool(hub.is_action_just_released(action))
+	return Input.is_action_just_released(action)
+
 func _handle_input() -> void:
-	var keyboard_axis = Input.get_axis("move_left", "move_right")
+	var keyboard_axis = _input_axis("move_left", "move_right")
 	move_axis = keyboard_axis
 	if absf(virtual_move_axis) > absf(move_axis):
 		move_axis = virtual_move_axis
@@ -274,9 +350,9 @@ func _handle_input() -> void:
 	if absf(move_axis) > 0.05 and not _is_attack_state(current_state):
 		facing_dir = Vector2(signf(move_axis), 0.0)
 
-	if Input.is_action_just_pressed("jump"):
+	if _action_just_pressed("jump"):
 		jump_buffer_timer = jump_buffer_time
-	if Input.is_action_just_released("jump"):
+	if _action_just_released("jump"):
 		_apply_jump_cut()
 
 	if jump_buffer_timer > 0.0:
@@ -285,47 +361,47 @@ func _handle_input() -> void:
 		elif _can_wall_jump():
 			_perform_wall_jump()
 
-	if Input.is_action_just_pressed("attack") and _is_attack_state(current_state):
+	if _action_just_pressed("attack") and _is_attack_state(current_state):
 		queued_attack = true
 
 	if _is_locked():
 		return
 
-	if Input.is_action_just_pressed("guard"):
+	if _action_just_pressed("guard"):
 		if _can_use_stamina(parry_stamina):
 			_enter_parry()
 			return
 
-	if Input.is_action_pressed("guard"):
+	if _action_pressed("guard"):
 		if current_state != State.GUARD:
 			_enter_guard()
 		return
 
-	if Input.is_action_just_released("guard"):
+	if _action_just_released("guard"):
 		if current_state == State.GUARD:
 			_change_state(State.IDLE)
 			return
 
-	if Input.is_action_just_pressed("attack"):
+	if _action_just_pressed("attack"):
 		_try_attack()
 		return
 
-	if Input.is_action_just_pressed("roll"):
+	if _action_just_pressed("roll"):
 		if _can_use_stamina(roll_stamina):
 			_enter_roll()
 			return
 
-	if Input.is_action_just_pressed("estus"):
+	if _action_just_pressed("estus"):
 		if estus_charges > 0 and _can_use_stamina(estus_stamina):
 			_enter_estus()
 			return
 
-	if Input.is_action_just_pressed("skill_1"):
+	if _action_just_pressed("skill_1"):
 		if skill1_cd <= 0 and _can_use_stamina(18.0):
 			_enter_skill1()
 			return
 
-	if Input.is_action_just_pressed("skill_2"):
+	if _action_just_pressed("skill_2"):
 		if skill2_cd <= 0 and _can_use_stamina(18.0):
 			_enter_skill2()
 			return
@@ -362,7 +438,7 @@ func _process_state(delta: float) -> void:
 
 		State.ROLL:
 			if state_timer > 0:
-				velocity.x = move_toward(velocity.x, 0.0, ground_brake * 2.6 * delta)
+				_process_roll_motion(delta)
 			else:
 				_change_state(State.IDLE)
 
@@ -433,39 +509,35 @@ func _update_attack_motion(delta: float) -> void:
 		attack_duration_current = maxf(0.001, state_timer + delta)
 	attack_elapsed += delta
 	var progress = _attack_progress()
-	if not queued_attack and Input.is_action_pressed("attack"):
+	if not queued_attack and _action_pressed("attack"):
 		var queue_open: float = 0.26
 		if current_state == State.ATTACK_3:
 			queue_open = 0.3
 		if progress >= queue_open and state_timer > 0.06:
 			queued_attack = true
-	var lunge_strength = 0.0
-	var windup_backstep = 0.0
-	var startup = 0.36
-	match current_state:
-		State.ATTACK_1:
-			lunge_strength = 330.0
-			windup_backstep = 85.0
-			startup = 0.34
-		State.ATTACK_2:
-			lunge_strength = 410.0
-			windup_backstep = 100.0
-			startup = 0.38
-		State.ATTACK_3:
-			lunge_strength = 500.0
-			windup_backstep = 120.0
-			startup = 0.42
-		_:
-			lunge_strength = 0.0
-	var target_speed = 0.0
-	if progress < startup:
-		var prep = clampf(progress / maxf(0.01, startup), 0.0, 1.0)
-		target_speed = -facing_dir.x * windup_backstep * pow(prep, 1.5)
+	if is_on_floor():
+		velocity.x = 0.0
 	else:
-		var swing_phase = clampf((progress - startup) / maxf(0.01, 1.0 - startup), 0.0, 1.0)
-		var swing_wave = sin(swing_phase * PI)
-		target_speed = facing_dir.x * lunge_strength * maxf(0.0, swing_wave)
-	velocity.x = move_toward(velocity.x, target_speed, ground_decel * 1.05 * delta)
+		var air_damp = air_brake * 2.4
+		velocity.x = move_toward(velocity.x, 0.0, air_damp * delta)
+
+func _process_roll_motion(delta: float) -> void:
+	if roll_stationary:
+		var damp = ground_brake * 3.4 if is_on_floor() else air_brake * 2.5
+		velocity.x = move_toward(velocity.x, 0.0, damp * delta)
+		return
+	var total = maxf(0.001, roll_iframes + roll_recovery)
+	var p = 1.0 - clampf(state_timer / total, 0.0, 1.0)
+	var curve = 1.0 - pow(p, 1.35)
+	if p > 0.72:
+		curve *= clampf((1.0 - p) / 0.28, 0.0, 1.0)
+	var desired_speed = roll_dir_x * roll_start_speed * (0.75 + 0.38 * curve)
+	if p > 0.84:
+		desired_speed *= 0.42
+	var accel = ground_accel * 3.2 if is_on_floor() else air_accel * 2.0
+	velocity.x = move_toward(velocity.x, desired_speed, accel * delta)
+	if is_on_wall():
+		velocity.x = 0.0
 
 func _apply_gravity(delta: float) -> void:
 	if is_on_floor():
@@ -480,11 +552,11 @@ func _apply_gravity(delta: float) -> void:
 
 	var gravity_scale = 1.0
 	var fall_limit = max_fall_speed
-	var fast_fall = velocity.y > 0.0 and Input.is_action_pressed("move_down")
+	var fast_fall = velocity.y > 0.0 and _action_pressed("move_down")
 	if fast_fall:
 		gravity_scale = fast_fall_gravity_scale
 		fall_limit = fast_fall_max_speed
-	elif absf(velocity.y) <= apex_hang_velocity_band and Input.is_action_pressed("jump"):
+	elif absf(velocity.y) <= apex_hang_velocity_band and _action_pressed("jump"):
 		gravity_scale *= apex_hang_gravity_scale
 		if absf(move_axis) > 0.08:
 			var apex_speed = move_axis * move_speed * apex_hang_move_boost
@@ -599,26 +671,50 @@ func _try_attack() -> void:
 			state_timer = attack3_recovery + 0.22
 			_last_attack = 0
 			_begin_attack_profile(3, state_timer, true)
+	var stage_strength = float(stage + 1)
+	_trigger_camera_shake(1.0 + 0.4 * stage_strength, 0.04 + 0.01 * stage_strength)
+	_trigger_style_ring(_attack_style_color(int(current_state), 0.92), 10.0 + 2.2 * stage_strength, 0.12 + 0.02 * stage_strength)
 
 	emit_signal("debug_log", "ATTACK %d (dmg:%d stm:%.0f)" % [stage + 1, attack_damage[stage], attack_stamina[stage]])
 
-func _enter_roll() -> void:
+func _enter_roll(force_directional: bool = false) -> void:
 	var airborne = not is_on_floor()
 	if airborne and remaining_air_rolls <= 0:
 		emit_signal("debug_log", "ROLL LIMIT")
 		return
+	var input_dir: float = 0.0
+	if absf(move_axis) > 0.22:
+		input_dir = signf(move_axis)
+	elif force_directional:
+		input_dir = 1.0 if facing_dir.x >= 0.0 else -1.0
 	_consume_stamina(roll_stamina)
-	if absf(move_axis) > 0.05:
-		facing_dir = Vector2(signf(move_axis), 0.0)
+	roll_stationary = absf(input_dir) <= 0.01
+	if not roll_stationary:
+		facing_dir = Vector2(input_dir, 0.0)
 	if airborne:
 		remaining_air_rolls -= 1
 	wall_slide_active = false
 	wall_slide_side = 0.0
 	_change_state(State.ROLL)
-	velocity.x = 0.0
+	roll_dir_x = facing_dir.x
+	if roll_dir_x == 0.0:
+		roll_dir_x = 1.0
+	if roll_stationary:
+		roll_start_speed = 0.0
+		velocity.x = 0.0
+		state_timer = in_place_dodge_iframes + in_place_dodge_recovery
+		iframes_timer = in_place_dodge_iframes
+		emit_signal(
+			"debug_log",
+			"DODGE IN PLACE (iframes %.2fs)" % in_place_dodge_iframes
+		)
+		return
+	var roll_total = maxf(0.001, roll_iframes + roll_recovery)
+	roll_start_speed = roll_distance / roll_total
+	velocity.x = roll_dir_x * roll_start_speed
 	state_timer = roll_iframes + roll_recovery
 	iframes_timer = roll_iframes
-	emit_signal("debug_log", "ROLL (iframes %.2fs)" % roll_iframes)
+	emit_signal("debug_log", "ROLL (iframes %.2fs dist %.0f)" % [roll_iframes, roll_distance])
 
 func _enter_estus() -> void:
 	_consume_stamina(estus_stamina)
@@ -636,6 +732,8 @@ func _enter_skill1() -> void:
 	_change_state(State.SKILL_1)
 	state_timer = 0.52
 	_begin_attack_profile(4, state_timer, true)
+	_trigger_style_ring(_attack_style_color(int(State.SKILL_1), 0.95), 17.0, 0.2)
+	_trigger_camera_shake(1.9, 0.08)
 	skill1_cd = 6.0
 	emit_signal("debug_log", "SKILL1: thrust (dmg:%d CT:6s)" % skill1_damage)
 
@@ -644,15 +742,19 @@ func _enter_skill2() -> void:
 	_change_state(State.SKILL_2)
 	state_timer = 0.62
 	_begin_attack_profile(5, state_timer, true)
+	_trigger_style_ring(_attack_style_color(int(State.SKILL_2), 0.95), 20.0, 0.24)
+	_trigger_camera_shake(2.1, 0.1)
 	skill2_cd = 9.0
 	emit_signal("debug_log", "SKILL2: spin slash (dmg:%d CT:9s)" % skill2_damage)
 
 func take_damage(amount: int, _poise_damage: int = 0, source: Node = null) -> void:
 	if iframes_timer > 0:
+		if current_state == State.ROLL:
+			_on_dodge_success(source)
 		return
 
 	if current_state == State.PARRY and parry_active_timer > 0:
-		emit_signal("debug_log", "PARRY SUCCESS")
+		_on_parry_success(source)
 		if source and source.has_method("take_damage") and source.is_in_group("enemies"):
 			var src2d: Node2D = source as Node2D
 			var dir_x = signf(src2d.global_position.x - global_position.x)
@@ -687,6 +789,8 @@ func take_damage(amount: int, _poise_damage: int = 0, source: Node = null) -> vo
 
 func take_hazard_damage(amount: int, source: Node = null) -> void:
 	if iframes_timer > 0:
+		if current_state == State.ROLL:
+			_on_dodge_success(source)
 		return
 	var previous_hp = hp
 	hp = maxi(0, hp - amount)
@@ -698,6 +802,28 @@ func take_hazard_damage(amount: int, source: Node = null) -> void:
 			src_name = source.name
 		emit_signal("debug_log", "%s -%d HP (ガード不可)" % [src_name, amount])
 	emit_signal("hp_changed", hp, max_hp)
+
+func _on_dodge_success(_source: Node = null) -> void:
+	if defense_feedback_cooldown > 0.0:
+		return
+	defense_feedback_cooldown = 0.12
+	dodge_success_timer = dodge_success_duration
+	_trigger_camera_shake(1.1, 0.05)
+	_trigger_style_ring(Color(0.56, 0.98, 1.0, 0.95), 12.0 if roll_stationary else 14.0, 0.14)
+	emit_signal("impact_fx_requested", 0.16, 0.05, Color(0.56, 0.98, 1.0, 0.8))
+	emit_signal("debug_log", "DODGE SUCCESS")
+	if DisplayServer.get_name() != "headless":
+		_play_defense_se(false)
+
+func _on_parry_success(_source: Node = null) -> void:
+	parry_success_timer = parry_success_duration
+	_trigger_camera_shake(2.8, 0.09)
+	_trigger_style_ring(Color(1.0, 0.92, 0.36, 0.96), 18.0, 0.22)
+	emit_signal("impact_fx_requested", 0.26, 0.08, Color(1.0, 0.92, 0.36, 0.9))
+	emit_signal("debug_log", "PARRY SUCCESS")
+	_trigger_hitstop(true)
+	if DisplayServer.get_name() != "headless":
+		_play_defense_se(true)
 
 func _check_attack_hits() -> void:
 	var atk_range = 0.0
@@ -755,11 +881,17 @@ func _trigger_hitstop(heavy: bool = false) -> void:
 	if not hitstop_enabled:
 		return
 	var restore_scale = maxf(1.0, Engine.time_scale)
-	var hitstop_scale = 0.04
-	var hitstop_time = 0.065
+	var stage = clampi(attack_stage_current, 1, 5)
+	var hitstop_scale = 0.028
+	var hitstop_time = 0.09
+	if stage >= 2:
+		hitstop_scale = 0.024
+		hitstop_time = 0.104
 	if heavy:
-		hitstop_scale = 0.02
-		hitstop_time = 0.095
+		hitstop_scale = 0.012
+		hitstop_time = 0.13
+		if stage >= 4:
+			hitstop_time = 0.145
 	Engine.time_scale = minf(hitstop_scale, restore_scale)
 	get_tree().create_timer(hitstop_time, true, false, true).timeout.connect(
 		func() -> void:
@@ -808,12 +940,13 @@ func _on_attack_hit_confirm(heavy_hit: bool) -> void:
 	if heavy_hit:
 		recoil = 34.0
 	velocity.x -= facing_dir.x * recoil
-	if not is_on_floor() and Input.is_action_pressed("move_down"):
+	if not is_on_floor() and _action_pressed("move_down"):
 		velocity.y = minf(velocity.y, -280.0)
 	_trigger_camera_shake(4.4 if heavy_hit else 3.0, 0.1 if heavy_hit else 0.08)
 	var tint = Color(0.72, 0.94, 1.0)
 	if heavy_hit:
 		tint = Color(1.0, 0.78, 0.44)
+	_trigger_style_ring(tint, 13.5 if heavy_hit else 11.0, 0.18 if heavy_hit else 0.14)
 	emit_signal("impact_fx_requested", 0.107, 0.04, tint)
 	if DisplayServer.get_name() != "headless":
 		_play_impact_se(heavy_hit)
@@ -825,8 +958,133 @@ func _trigger_swing_fx(stage: int, heavy: bool) -> void:
 		return
 	swing_fx_stage = stage
 	swing_fx_heavy = heavy
-	swing_fx_duration = 0.27 if heavy else 0.19
+	swing_fx_duration = 0.31 if heavy else 0.22
 	swing_fx_timer = swing_fx_duration
+
+func _update_style_afterimages(delta: float) -> void:
+	if not show_combat_trails or not stylish_afterimages:
+		style_afterimages.clear()
+		style_afterimage_timer = 0.0
+		return
+	var kept: Array[Dictionary] = []
+	for image_variant in style_afterimages:
+		var image: Dictionary = image_variant
+		var remaining = float(image.get("time", 0.0)) - delta
+		if remaining <= 0.0:
+			continue
+		image["time"] = remaining
+		kept.append(image)
+	style_afterimages = kept
+	var in_stylish_state = current_state in [State.ATTACK_1, State.ATTACK_2, State.ATTACK_3, State.SKILL_1, State.SKILL_2, State.ROLL]
+	if not in_stylish_state:
+		style_afterimage_timer = 0.0
+		return
+	style_afterimage_timer -= delta
+	if style_afterimage_timer > 0.0:
+		return
+	_spawn_style_afterimage()
+	var interval = clampf(stylish_afterimage_interval, 0.01, 0.08)
+	if current_state in [State.ATTACK_3, State.SKILL_1, State.SKILL_2]:
+		interval *= 0.78
+	elif current_state == State.ROLL:
+		interval *= 0.85
+	style_afterimage_timer = interval
+
+func _spawn_style_afterimage() -> void:
+	var lifetime = clampf(stylish_afterimage_lifetime, 0.05, 0.28)
+	if current_state in [State.ATTACK_3, State.SKILL_1, State.SKILL_2]:
+		lifetime += 0.03
+	var roll_total = maxf(
+		0.001,
+		(in_place_dodge_iframes + in_place_dodge_recovery) if roll_stationary else (roll_iframes + roll_recovery)
+	)
+	var roll_p = 0.0
+	if current_state == State.ROLL:
+		roll_p = 1.0 - clampf(state_timer / roll_total, 0.0, 1.0)
+	style_afterimages.append(
+		{
+			"global_pos": global_position,
+			"facing": 1.0 if facing_dir.x >= 0.0 else -1.0,
+			"state": int(current_state),
+			"attack_p": _attack_progress() if _is_attack_state(current_state) else 0.0,
+			"roll_p": roll_p,
+			"roll_stationary": roll_stationary,
+			"time": lifetime,
+			"max_time": lifetime
+		}
+	)
+	if style_afterimages.size() > 24:
+		style_afterimages.remove_at(0)
+
+func _trigger_style_ring(color: Color, radius: float, duration: float) -> void:
+	style_ring_color = color
+	style_ring_radius = radius
+	style_ring_duration = duration
+	style_ring_timer = duration
+
+func _attack_style_color(state_id: int, alpha: float) -> Color:
+	match state_id:
+		int(State.ATTACK_1):
+			return Color(0.58, 0.94, 1.0, alpha)
+		int(State.ATTACK_2):
+			return Color(0.82, 0.66, 1.0, alpha)
+		int(State.ATTACK_3):
+			return Color(1.0, 0.72, 0.4, alpha)
+		int(State.SKILL_1):
+			return Color(1.0, 0.54, 0.28, alpha)
+		int(State.SKILL_2):
+			return Color(0.68, 0.9, 1.0, alpha)
+		_:
+			return Color(0.86, 0.92, 1.0, alpha)
+
+func _draw_style_afterimages() -> void:
+	if style_afterimages.is_empty():
+		return
+	for image_variant in style_afterimages:
+		var image: Dictionary = image_variant
+		var max_time = maxf(0.001, float(image.get("max_time", 0.1)))
+		var fade = clampf(float(image.get("time", 0.0)) / max_time, 0.0, 1.0)
+		var snapshot_pos: Vector2 = global_position
+		var snapshot_variant = image.get("global_pos", global_position)
+		if snapshot_variant is Vector2:
+			snapshot_pos = snapshot_variant
+		var center = to_local(snapshot_pos)
+		var facing = float(image.get("facing", 1.0))
+		var state_id = int(image.get("state", int(State.IDLE)))
+		var attack_p = float(image.get("attack_p", 0.0))
+		var roll_p = float(image.get("roll_p", 0.0))
+		var image_roll_stationary = bool(image.get("roll_stationary", false))
+		var color = _attack_style_color(state_id, 0.26 * fade)
+		var head = center + Vector2(0.5 * facing, -13.0)
+		var neck = center + Vector2(0.2 * facing, -7.1)
+		var pelvis = center + Vector2(-0.25 * facing, 1.9)
+		if state_id in [int(State.ATTACK_1), int(State.ATTACK_2), int(State.ATTACK_3), int(State.SKILL_1), int(State.SKILL_2)]:
+			head += Vector2(1.5 * facing * attack_p, -0.8 * attack_p)
+			neck += Vector2(2.6 * facing * attack_p, -0.4 * attack_p)
+			pelvis += Vector2(-1.8 * facing * attack_p, 0.3 * attack_p)
+		elif state_id == int(State.ROLL):
+			if image_roll_stationary:
+				head += Vector2(-1.6 * facing, 1.8 + 1.0 * roll_p)
+				neck += Vector2(-1.2 * facing, 1.5 + 0.8 * roll_p)
+				pelvis += Vector2(0.5 * facing, 1.5)
+			else:
+				head += Vector2(-3.0 * facing, 2.4 + 1.2 * roll_p)
+				neck += Vector2(-2.4 * facing, 2.0 + 1.0 * roll_p)
+				pelvis += Vector2(-0.9 * facing, 1.9)
+		draw_line(neck, pelvis, color, 1.6)
+		draw_circle(head, 2.5, color)
+		draw_line(neck, neck + Vector2(5.8 * facing, -1.0), Color(color.r, color.g, color.b, color.a * 0.72), 1.2)
+		draw_line(pelvis, pelvis + Vector2(-4.8 * facing, 3.3), Color(color.r, color.g, color.b, color.a * 0.62), 1.15)
+
+func _draw_attack_speed_lines(facing: float, attack_p: float) -> void:
+	var base_color = _attack_style_color(int(current_state), 0.38 + 0.18 * sin(attack_p * PI))
+	for i in range(5):
+		var t = float(i) / 4.0
+		var y = -12.0 + t * 16.0 + sin((attack_p + t * 0.4) * PI) * 0.9
+		var line_len = 8.0 + 5.8 * (1.0 - absf(t - 0.5) * 1.8)
+		var start = Vector2(-facing * 2.6, y)
+		var end = start + Vector2(facing * line_len, 0.5 * sin((attack_p + t) * TAU))
+		draw_line(start, end, Color(base_color.r, base_color.g, base_color.b, base_color.a * (1.0 - 0.1 * t)), 1.05 + 0.32 * (1.0 - t))
 
 func _update_slash_chain(delta: float) -> void:
 	if not show_combat_trails:
@@ -896,19 +1154,13 @@ func _build_slash_chain_profile(progress: float, stage: int, phase: int, heavy: 
 func _play_swing_se(stage: int, heavy: bool) -> void:
 	var se = AudioStreamPlayer2D.new()
 	se.max_distance = 1900.0
-	se.volume_db = -4.1
-	var start_freq = 152.0 + 12.0 * float(stage)
-	var end_freq = 360.0 + 22.0 * float(stage)
-	var duration = 0.2
-	var noise_mix = 0.24
-	var tone_mix = 0.42
+	se.volume_db = -3.4 if heavy else -4.8
+	var duration = 0.24 if heavy else 0.18
+	var start_freq = 174.0 + 26.0 * float(stage)
+	var end_freq = 640.0 + 46.0 * float(stage)
 	if heavy:
-		start_freq = 112.0 + 10.0 * float(stage)
-		end_freq = 308.0 + 18.0 * float(stage)
-		duration = 0.24
-		noise_mix = 0.3
-		tone_mix = 0.34
-		se.volume_db = -2.3
+		start_freq = 148.0 + 24.0 * float(stage)
+		end_freq = 582.0 + 42.0 * float(stage)
 	var stream = AudioStreamGenerator.new()
 	stream.mix_rate = SWING_SE_MIX_RATE
 	stream.buffer_length = 0.42
@@ -922,42 +1174,44 @@ func _play_swing_se(stage: int, heavy: bool) -> void:
 		return
 	var total_frames = int(SWING_SE_MIX_RATE * duration)
 	var write_count = mini(total_frames, playback.get_frames_available())
-	var pitch_jitter = randf_range(0.97, 1.03)
+	var pitch_jitter = randf_range(0.985, 1.018)
 	start_freq *= pitch_jitter
 	end_freq *= pitch_jitter
-	var delay_frames = int(0.016 * float(SWING_SE_MIX_RATE))
+	var delay_frames = int(0.014 * float(SWING_SE_MIX_RATE))
 	var delay_buffer: Array[float] = []
 	delay_buffer.resize(delay_frames + 1)
 	for d in range(delay_buffer.size()):
 		delay_buffer[d] = 0.0
 	var delay_index = 0
-	var lp = 0.0
+	var low_noise = 0.0
 	for i in range(write_count):
 		var p = float(i) / float(maxi(1, total_frames - 1))
-		var freq = lerpf(start_freq, end_freq, p)
+		var freq = lerpf(start_freq, end_freq, pow(p, 0.72))
 		var t = float(i) / float(SWING_SE_MIX_RATE)
-		var envelope = pow(1.0 - p, 1.65)
+		var envelope = pow(1.0 - p, 1.48 if heavy else 1.38)
 		var noise = randf_range(-1.0, 1.0)
-		lp = lerpf(lp, noise, 0.22 + 0.09 * p)
-		var whoosh = noise - lp
-		var tone = sin(TAU * freq * t)
-		var sub = sin(TAU * (46.0 + 4.0 * float(stage)) * t) * exp(-4.2 * p)
-		var scrape = sin(TAU * (freq * 1.44) * t + sin(TAU * 5.6 * t) * 0.26) * exp(-5.5 * p)
-		var transient = exp(-60.0 * p) * randf_range(-1.0, 1.0)
+		low_noise = lerpf(low_noise, noise, 0.08 + 0.17 * p)
+		var air = (noise - low_noise) * (0.42 + 0.16 * (1.0 - p))
+		var chirp = sin(TAU * freq * t + 8.0 * p * p)
+		var undertone = sin(TAU * (freq * 0.41) * t) * exp(-5.6 * p)
+		var metallic = sin(TAU * (freq * 1.52) * t + sin(TAU * 6.2 * t) * 0.38) * exp(-8.8 * p)
+		var attack_click = sin(TAU * (960.0 + 130.0 * float(stage)) * t) * exp(-42.0 * p)
 		var dry = (
-			tone * tone_mix
-			+ sub * (0.64 if heavy else 0.52)
-			+ scrape * (0.4 if heavy else 0.3)
-			+ whoosh * noise_mix
-			+ transient * 0.42
+			chirp * (0.48 if heavy else 0.44)
+			+ undertone * (0.56 if heavy else 0.48)
+			+ metallic * (0.34 if heavy else 0.26)
+			+ air * (0.42 if heavy else 0.34)
+			+ attack_click * 0.22
 		) * envelope
 		var delayed = delay_buffer[delay_index]
-		var sample = dry + delayed * (0.4 if heavy else 0.3)
+		var sample = dry + delayed * (0.36 if heavy else 0.28)
 		delay_buffer[delay_index] = dry
 		delay_index = (delay_index + 1) % delay_buffer.size()
-		sample = sample / (1.0 + absf(sample) * 1.2)
-		sample = clampf(sample, -1.0, 1.0)
-		playback.push_frame(Vector2(sample, sample))
+		sample = sample / (1.0 + absf(sample) * 0.95)
+		var width = 0.06 + 0.05 * sin(p * PI)
+		var left = clampf(sample * (1.0 + width), -1.0, 1.0)
+		var right = clampf(sample * (1.0 - width), -1.0, 1.0)
+		playback.push_frame(Vector2(left, right))
 	get_tree().create_timer(duration + 0.1).timeout.connect(
 		func() -> void:
 			if is_instance_valid(se):
@@ -967,12 +1221,12 @@ func _play_swing_se(stage: int, heavy: bool) -> void:
 func _play_impact_se(heavy: bool) -> void:
 	var se = AudioStreamPlayer2D.new()
 	se.max_distance = 1700.0
-	se.volume_db = -2.2 if heavy else -4.3
-	var duration = 0.24 if heavy else 0.18
-	var sub_freq = 42.0 if heavy else 58.0
-	var body_freq = 94.0 if heavy else 128.0
-	var clang_a = 230.0 if heavy else 310.0
-	var clang_b = 420.0 if heavy else 590.0
+	se.volume_db = -2.1 if heavy else -3.8
+	var duration = 0.26 if heavy else 0.2
+	var sub_freq = 44.0 if heavy else 62.0
+	var body_freq = 112.0 if heavy else 152.0
+	var clang_a = 520.0 if heavy else 690.0
+	var clang_b = 860.0 if heavy else 1060.0
 	var stream = AudioStreamGenerator.new()
 	stream.mix_rate = IMPACT_SE_MIX_RATE
 	stream.buffer_length = 0.4
@@ -986,7 +1240,7 @@ func _play_impact_se(heavy: bool) -> void:
 		return
 	var total_frames = int(IMPACT_SE_MIX_RATE * duration)
 	var write_count = mini(total_frames, playback.get_frames_available())
-	var delay_frames = int(0.02 * float(IMPACT_SE_MIX_RATE))
+	var delay_frames = int(0.017 * float(IMPACT_SE_MIX_RATE))
 	var delay_buffer: Array[float] = []
 	delay_buffer.resize(delay_frames + 1)
 	for i in range(delay_buffer.size()):
@@ -995,21 +1249,71 @@ func _play_impact_se(heavy: bool) -> void:
 	for i in range(write_count):
 		var p = float(i) / float(maxi(1, total_frames - 1))
 		var t = float(i) / float(IMPACT_SE_MIX_RATE)
-		var env = pow(1.0 - p, 2.05)
-		var sub = sin(TAU * sub_freq * t) * 0.92 * exp(-4.3 * p)
-		var body = sin(TAU * body_freq * t) * 0.62 * exp(-6.5 * p)
-		var clang = (sin(TAU * clang_a * t) * 0.28 + sin(TAU * clang_b * t) * 0.24) * exp(-11.0 * p)
-		var crack = sin(TAU * (clang_b * 1.5) * t + sin(TAU * 11.0 * t) * 0.35) * exp(-15.0 * p) * (0.36 if heavy else 0.22)
-		var grit = randf_range(-1.0, 1.0) * (0.44 if heavy else 0.32) * exp(-17.0 * p)
-		var dry = (sub + body + clang + crack + grit) * env
+		var env = pow(1.0 - p, 1.86 if heavy else 1.74)
+		var sub = sin(TAU * sub_freq * t) * exp(-4.8 * p) * (0.92 if heavy else 0.74)
+		var body = sin(TAU * body_freq * t + sin(TAU * 17.0 * t) * 0.2) * exp(-7.2 * p) * 0.66
+		var clang = (
+			sin(TAU * clang_a * t) * (0.36 if heavy else 0.3)
+			+ sin(TAU * clang_b * t) * (0.3 if heavy else 0.24)
+		) * exp(-15.5 * p)
+		var edge = sin(TAU * (clang_b * 1.48) * t + sin(TAU * 12.0 * t) * 0.3) * exp(-21.0 * p) * (0.24 if heavy else 0.18)
+		var grit = randf_range(-1.0, 1.0) * (0.3 if heavy else 0.24) * exp(-22.0 * p)
+		var click = randf_range(-1.0, 1.0) * exp(-95.0 * p) * (0.46 if heavy else 0.34)
+		var dry = (sub + body + clang + edge + grit + click) * env
 		var delayed = delay_buffer[delay_index]
-		var sample = dry + delayed * (0.48 if heavy else 0.36)
+		var sample = dry + delayed * (0.44 if heavy else 0.34)
 		delay_buffer[delay_index] = dry
 		delay_index = (delay_index + 1) % delay_buffer.size()
-		sample = sample / (1.0 + absf(sample) * 1.2)
-		sample = clampf(sample, -1.0, 1.0)
-		playback.push_frame(Vector2(sample, sample))
+		sample = sample / (1.0 + absf(sample) * 1.05)
+		var width = 0.03 + 0.03 * sin(p * PI)
+		var left = clampf(sample * (1.0 + width), -1.0, 1.0)
+		var right = clampf(sample * (1.0 - width), -1.0, 1.0)
+		playback.push_frame(Vector2(left, right))
 	get_tree().create_timer(duration + 0.12).timeout.connect(
+		func() -> void:
+			if is_instance_valid(se):
+				se.queue_free()
+	)
+
+func _play_defense_se(parry_success: bool) -> void:
+	var se = AudioStreamPlayer2D.new()
+	se.max_distance = 1800.0
+	se.volume_db = -2.8 if parry_success else -5.2
+	var duration = 0.2 if parry_success else 0.12
+	var stream = AudioStreamGenerator.new()
+	stream.mix_rate = IMPACT_SE_MIX_RATE
+	stream.buffer_length = 0.3
+	se.stream = stream
+	add_child(se)
+	se.play()
+
+	var playback = se.get_stream_playback() as AudioStreamGeneratorPlayback
+	if playback == null:
+		se.queue_free()
+		return
+	var total_frames = int(IMPACT_SE_MIX_RATE * duration)
+	var write_count = mini(total_frames, playback.get_frames_available())
+	for i in range(write_count):
+		var p = float(i) / float(maxi(1, total_frames - 1))
+		var t = float(i) / float(IMPACT_SE_MIX_RATE)
+		var env = 0.0
+		var sample = 0.0
+		if parry_success:
+			env = pow(1.0 - p, 1.65)
+			var ping = sin(TAU * 980.0 * t + sin(TAU * 26.0 * t) * 0.2) * exp(-8.4 * p)
+			var bell = sin(TAU * 1520.0 * t) * exp(-9.8 * p)
+			var low = sin(TAU * 146.0 * t) * exp(-13.0 * p)
+			var sparkle = randf_range(-1.0, 1.0) * exp(-28.0 * p)
+			sample = (ping * 0.56 + bell * 0.44 + low * 0.24 + sparkle * 0.18) * env
+		else:
+			env = pow(1.0 - p, 1.38)
+			var whoosh = randf_range(-1.0, 1.0) * exp(-10.0 * p)
+			var tone = sin(TAU * 460.0 * t + p * 6.0) * exp(-7.0 * p)
+			var tick = sin(TAU * 790.0 * t) * exp(-26.0 * p)
+			sample = (whoosh * 0.42 + tone * 0.5 + tick * 0.3) * env
+		sample = sample / (1.0 + absf(sample) * 0.88)
+		playback.push_frame(Vector2(sample, sample))
+	get_tree().create_timer(duration + 0.08).timeout.connect(
 		func() -> void:
 			if is_instance_valid(se):
 				se.queue_free()
@@ -1105,9 +1409,9 @@ func _spawn_hit_spark(world_pos: Vector2, hit_dir: Vector2, heavy: bool = false)
 		dir = Vector2(facing_dir.x, 0.0).normalized()
 	fx.global_position = world_pos + Vector2(0.0, -6.0) + dir * 10.0
 	if fx.has_method("configure"):
-		var color = Color(0.58, 0.9, 1.0, 0.95)
+		var color = _attack_style_color(int(current_state), 0.95)
 		if heavy:
-			color = Color(1.0, 0.82, 0.42, 0.95)
+			color = Color(1.0, 0.8, 0.4, 0.95)
 		fx.call("configure", dir, color, heavy)
 	parent_node.add_child(fx)
 
@@ -1123,7 +1427,7 @@ func ai_roll() -> void:
 	if _is_locked():
 		return
 	if _can_use_stamina(roll_stamina):
-		_enter_roll()
+		_enter_roll(true)
 
 func ai_guard_start() -> void:
 	if _is_locked():
@@ -1189,7 +1493,46 @@ func _update_visuals() -> void:
 
 func _draw() -> void:
 	var draw_scale = clampf(silhouette_scale, 0.8, 1.2)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2(draw_scale, draw_scale))
+	var attack_pose = current_state in [State.ATTACK_1, State.ATTACK_2, State.ATTACK_3, State.SKILL_1, State.SKILL_2]
+	var attack_p = _attack_progress() if attack_pose else 0.0
+	var roll_pose = current_state == State.ROLL
+	var roll_total = maxf(
+		0.001,
+		(in_place_dodge_iframes + in_place_dodge_recovery) if roll_stationary else (roll_iframes + roll_recovery)
+	)
+	var roll_p = 0.0
+	if roll_pose:
+		roll_p = 1.0 - clampf(state_timer / roll_total, 0.0, 1.0)
+	var draw_rotation = 0.0
+	var draw_offset = Vector2.ZERO
+	var draw_stretch = Vector2(draw_scale, draw_scale)
+	var visual_facing = 1.0 if facing_dir.x >= 0.0 else -1.0
+	if attack_pose:
+		var attack_stage = float(clampi(attack_stage_current, 1, 5))
+		var motion_power = 1.0 + 0.1 * minf(attack_stage, 3.0)
+		var prep_curve = sin(clampf(attack_p / 0.34, 0.0, 1.0) * PI * 0.5)
+		var strike_curve = sin(clampf((attack_p - 0.2) / 0.52, 0.0, 1.0) * PI)
+		var recover_curve = pow(clampf((attack_p - 0.66) / 0.34, 0.0, 1.0), 1.15)
+		draw_offset += Vector2(
+			visual_facing * ((-1.6 * prep_curve) + (4.2 * strike_curve) - (2.0 * recover_curve)) * motion_power,
+			-0.9 * prep_curve + 1.0 * strike_curve
+		)
+		draw_rotation += visual_facing * ((-0.07 * prep_curve) + (0.11 * strike_curve) - (0.06 * recover_curve)) * motion_power
+		draw_stretch = Vector2(
+			draw_stretch.x * (1.0 + 0.08 * strike_curve),
+			draw_stretch.y * (1.0 - 0.06 * strike_curve + 0.04 * prep_curve)
+		)
+	if roll_pose:
+		if roll_stationary:
+			var evade_wave = sin(roll_p * PI)
+			draw_rotation += roll_dir_x * 0.19 * sin((roll_p - 0.18) * PI)
+			draw_offset += Vector2(-roll_dir_x * 1.5 * evade_wave, -0.7 * evade_wave)
+			draw_stretch = Vector2(draw_scale * (1.04 + 0.04 * evade_wave), draw_scale * (0.9 - 0.05 * evade_wave))
+		else:
+			draw_rotation = roll_dir_x * (roll_p * TAU)
+			draw_offset = Vector2(0.0, sin(roll_p * PI) * 1.0)
+			draw_stretch = Vector2(draw_scale * 1.06, draw_scale * 0.88)
+	draw_set_transform(draw_offset, draw_rotation, draw_stretch)
 	var body_color = Color(0.78, 0.9, 1.0)
 	match current_state:
 		State.ROLL:
@@ -1214,13 +1557,9 @@ func _draw() -> void:
 	if current_state == State.MOVE and is_on_floor():
 		step = sin(float(Time.get_ticks_msec()) * 0.02) * 2.7
 	var lean = clampf(velocity.x / maxf(move_speed, 1.0), -1.0, 1.0) * 1.6
-	var attack_pose = current_state in [State.ATTACK_1, State.ATTACK_2, State.ATTACK_3, State.SKILL_1, State.SKILL_2]
-	var attack_p = _attack_progress() if attack_pose else 0.0
-	var roll_pose = current_state == State.ROLL
-	var roll_total = maxf(0.001, roll_iframes + roll_recovery)
-	var roll_p = 0.0
-	if roll_pose:
-		roll_p = 1.0 - clampf(state_timer / roll_total, 0.0, 1.0)
+
+	if show_combat_trails and stylish_afterimages:
+		_draw_style_afterimages()
 
 	draw_circle(Vector2(0, 12), 6.8, Color(0.0, 0.0, 0.0, 0.19))
 
@@ -1234,25 +1573,120 @@ func _draw() -> void:
 	var lead_arm = Vector2(6.2 * facing, -1.7 + step * 0.22)
 	var rear_arm = Vector2(-5.8 * facing, -2.2 - step * 0.2)
 	if attack_pose:
-		var swing_bias = sin(attack_p * PI)
-		head += Vector2(0.45 * facing, -0.7)
-		neck += Vector2(0.65 * facing, -0.3)
-		pelvis += Vector2(-0.8 * facing, 0.15)
-		lead_knee += Vector2(0.9 * facing, 0.2)
-		rear_knee += Vector2(-0.8 * facing, 0.4)
-		lead_arm = Vector2((7.2 + 2.0 * swing_bias) * facing, -6.0 + 3.6 * attack_p)
-		rear_arm = Vector2((-5.5 + 1.0 * swing_bias) * facing, -4.6)
+		var stage_id = clampi(attack_stage_current, 1, 5)
+		var stage_power = 1.0 + 0.16 * float(mini(stage_id, 3) - 1)
+		var prep = clampf(attack_p / 0.32, 0.0, 1.0)
+		var strike = clampf((attack_p - 0.2) / 0.5, 0.0, 1.0)
+		var recover = clampf((attack_p - 0.68) / 0.32, 0.0, 1.0)
+		var prep_curve = sin(prep * PI * 0.5)
+		var strike_curve = sin(strike * PI)
+		var recover_curve = pow(recover, 1.2)
+		var swing_snap = sin((strike - 0.08) * PI)
+		head += Vector2(
+			(-1.0 * prep_curve + 2.3 * strike_curve - 1.3 * recover_curve) * facing * stage_power,
+			-0.5 - 1.2 * prep_curve + 0.9 * strike_curve
+		)
+		neck += Vector2(
+			(-1.2 * prep_curve + 2.9 * strike_curve - 1.4 * recover_curve) * facing * stage_power,
+			-0.2 - 1.0 * prep_curve + 0.7 * strike_curve
+		)
+		pelvis += Vector2(
+			(1.4 * prep_curve - 1.9 * strike_curve + 1.1 * recover_curve) * facing * stage_power,
+			0.3 + 0.6 * prep_curve
+		)
+		lead_knee += Vector2(
+			(1.8 * prep_curve - 1.9 * strike_curve + 1.0 * recover_curve) * facing * stage_power,
+			0.5 + 0.7 * prep_curve
+		)
+		rear_knee += Vector2(
+			(-1.3 * prep_curve + 1.3 * strike_curve) * facing * stage_power,
+			0.7 + 0.5 * prep_curve
+		)
+		lead_foot += Vector2(
+			(-0.8 * strike_curve + 0.7 * recover_curve) * facing * stage_power,
+			0.3 + 0.4 * prep_curve
+		)
+		rear_foot += Vector2(
+			(1.0 * strike_curve - 0.6 * recover_curve) * facing * stage_power,
+			0.2 + 0.4 * prep_curve
+		)
+		lead_arm = Vector2(
+			(6.0 + 3.2 * prep_curve + 5.6 * strike_curve - 3.1 * recover_curve + 0.8 * swing_snap) * facing,
+			-5.6 - 3.2 * prep_curve + 4.8 * strike_curve + 1.2 * recover_curve
+		)
+		rear_arm = Vector2(
+			(-5.3 + 0.9 * prep_curve - 2.1 * strike_curve + 1.1 * recover_curve) * facing,
+			-4.6 + 1.6 * prep_curve - 0.8 * strike_curve
+		)
+		match current_state:
+			State.ATTACK_1:
+				lead_arm += Vector2(-1.2 * facing, -0.7)
+				rear_arm += Vector2(0.7 * facing, 0.5)
+			State.ATTACK_2:
+				head += Vector2(0.6 * facing, -0.2)
+				lead_arm += Vector2(1.2 * facing, -0.1)
+				rear_arm += Vector2(-0.9 * facing, -0.4)
+			State.ATTACK_3:
+				head += Vector2(-0.8 * facing, -0.8 * prep_curve)
+				pelvis += Vector2(-1.1 * facing, 0.8 * prep_curve)
+				lead_arm = Vector2(
+					(4.6 + 2.4 * prep_curve + 7.4 * strike_curve) * facing,
+					-8.8 - 5.6 * prep_curve + 8.0 * strike_curve
+				)
+				rear_arm = Vector2(
+					(-4.5 - 1.6 * strike_curve) * facing,
+					-6.1 + 1.5 * prep_curve
+				)
+				lead_knee += Vector2(1.2 * facing, 0.8)
+				rear_knee += Vector2(-0.9 * facing, 0.7)
+			State.SKILL_1:
+				var thrust = clampf((attack_p - 0.2) / 0.44, 0.0, 1.0)
+				var thrust_curve = sin(thrust * PI * 0.5)
+				head += Vector2(0.9 * thrust_curve * facing, -0.4)
+				neck += Vector2(1.8 * thrust_curve * facing, -0.2)
+				pelvis += Vector2(-0.9 * thrust_curve * facing, 0.0)
+				lead_arm = Vector2(
+					(9.0 + 3.6 * thrust_curve - 1.9 * recover_curve) * facing,
+					-5.5 + 1.6 * thrust_curve
+				)
+				rear_arm = Vector2((-4.8 - 1.2 * thrust_curve) * facing, -4.8)
+			State.SKILL_2:
+				var spin = sin(attack_p * TAU * 1.25)
+				var spin_up = sin(attack_p * TAU)
+				head += Vector2(0.8 * spin * facing, -0.5 + 0.3 * spin_up)
+				neck += Vector2(1.1 * spin * facing, -0.2 + 0.4 * spin_up)
+				lead_arm = Vector2((6.8 + 4.0 * spin) * facing, -4.9 + 2.2 * spin_up)
+				rear_arm = Vector2((-6.4 - 3.3 * spin) * facing, -4.5 - 2.0 * spin_up)
+				lead_knee += Vector2(0.9 * spin * facing, 0.2)
+				rear_knee += Vector2(-0.8 * spin * facing, 0.2)
+			_:
+				pass
 	elif roll_pose:
-		var tuck = sin(roll_p * PI)
-		head += Vector2(-2.4 * facing, 2.8 + 0.8 * tuck)
-		neck += Vector2(-1.9 * facing, 2.2 + 0.8 * tuck)
-		pelvis += Vector2(-0.3 * facing, 2.0)
-		lead_knee += Vector2(1.5 * facing, -1.6)
-		rear_knee += Vector2(-1.6 * facing, -1.2)
-		lead_foot += Vector2(-1.9 * facing, -2.1)
-		rear_foot += Vector2(1.8 * facing, -1.6)
-		lead_arm = Vector2(3.9 * facing, -1.1)
-		rear_arm = Vector2(-4.3 * facing, -0.8)
+		if roll_stationary:
+			var evade_wave = sin(roll_p * PI)
+			var evade_twist = sin((roll_p - 0.15) * PI)
+			head += Vector2(-2.6 * facing, 1.9 + 1.5 * evade_wave)
+			neck += Vector2(-2.0 * facing, 1.5 + 1.1 * evade_wave)
+			pelvis += Vector2(1.0 * facing * evade_twist, 1.2 + 0.8 * evade_wave)
+			lead_knee += Vector2(0.8 * facing, -1.5 + 0.5 * evade_wave)
+			rear_knee += Vector2(-0.9 * facing, -1.2 - 0.5 * evade_wave)
+			lead_foot += Vector2(-0.9 * facing, -1.3)
+			rear_foot += Vector2(0.9 * facing, -1.1)
+			lead_arm = Vector2(4.3 * facing, -0.6 + 0.9 * evade_wave)
+			rear_arm = Vector2(-4.6 * facing, -0.4 - 0.9 * evade_wave)
+		else:
+			var tuck = sin(roll_p * PI)
+			var spin_curve = sin(roll_p * PI * 1.35)
+			var tumble_wave = sin(roll_p * TAU)
+			head += Vector2(-5.8 * facing + 0.9 * tumble_wave, 4.4 + 2.1 * tuck)
+			neck += Vector2(-4.6 * facing + 0.7 * tumble_wave, 3.4 + 1.5 * tuck)
+			pelvis += Vector2(-3.1 * facing, 3.2 + 1.1 * spin_curve)
+			lead_knee += Vector2(3.3 * facing, -2.7 + 0.9 * spin_curve)
+			rear_knee += Vector2(-3.2 * facing, -2.3 - 0.7 * spin_curve)
+			lead_foot += Vector2(-3.8 * facing, -3.3)
+			rear_foot += Vector2(3.7 * facing, -2.9)
+			lead_arm = Vector2(5.6 * facing, 0.8 + 1.3 * spin_curve)
+			rear_arm = Vector2(-5.8 * facing, 0.6 - 1.3 * spin_curve)
 
 	draw_line(neck, pelvis, body_color, 2.1)
 	draw_line(neck, lead_arm, body_color.darkened(0.08), 1.9)
@@ -1328,6 +1762,8 @@ func _draw() -> void:
 		var core_start = slash_center + Vector2.RIGHT.rotated(start_angle + sweep * 0.52) * (inner_r + 0.6)
 		draw_line(core_start, tip_pos, Color(1.0, 1.0, 0.94, 0.22 + 0.38 * (1.0 - attack_fx_p)), 1.35)
 		draw_circle(tip_pos, 1.3 + 0.6 * (1.0 - attack_fx_p), Color(1.0, 0.95, 0.82, 0.5 * (1.0 - attack_fx_p)))
+		if _is_attack_hit_window_active():
+			_draw_attack_speed_lines(facing, attack_fx_p)
 
 	if current_state == State.GUARD:
 		var guard_pos = Vector2(7.0 * facing, -4.2)
@@ -1388,9 +1824,44 @@ func _draw() -> void:
 		for i in range(3):
 			var t = float(i + 1) / 3.0
 			var after_offset = Vector2(-facing * (2.4 + t * 2.8), 0.4 + t * 0.5)
+			if roll_stationary:
+				after_offset = Vector2(-roll_dir_x * (1.0 + t * 1.4), -0.2 + t * 0.35)
 			var after_alpha = (0.22 - 0.05 * float(i)) * dodge_fade
 			draw_line(neck + after_offset, pelvis + after_offset, Color(0.66, 0.95, 1.0, after_alpha), 1.3)
 			draw_circle(head + after_offset * 0.8, 2.3 - 0.3 * t, Color(0.66, 0.95, 1.0, after_alpha * 0.7))
+		if roll_stationary:
+			for i in range(4):
+				var a = TAU * float(i) / 4.0 + roll_p * PI * 0.6
+				var dir = Vector2.RIGHT.rotated(a)
+				var p0 = dodge_center + dir * (4.0 + dodge_wave * 1.8)
+				var p1 = dodge_center + dir * (8.2 + dodge_wave * 3.0)
+				draw_line(p0, p1, Color(0.66, 0.96, 1.0, (0.26 - 0.04 * float(i)) * dodge_fade), 1.05)
+			draw_arc(
+				dodge_center + Vector2(0.0, -0.6),
+				dodge_ring * 0.74,
+				0.0,
+				TAU,
+				24,
+				Color(0.7, 1.0, 1.0, 0.28 * dodge_fade),
+				1.0
+			)
+		else:
+			var spin_angle = float(Time.get_ticks_msec()) * 0.02 * roll_dir_x
+			for i in range(2):
+				var sweep = PI * (0.72 - 0.12 * float(i))
+				var arc_r = dodge_ring + 3.4 + float(i) * 2.8
+				draw_arc(
+					dodge_center + Vector2(-facing * 2.4, -0.6),
+					arc_r,
+					spin_angle + float(i) * 0.55,
+					spin_angle + float(i) * 0.55 + sweep,
+					24,
+					Color(0.62, 0.96, 1.0, (0.22 - 0.06 * float(i)) * dodge_fade),
+					1.15
+				)
+			var skid_start = pelvis + Vector2(-facing * 5.6, 8.4)
+			var skid_end = skid_start + Vector2(-facing * 7.8, 0.0)
+			draw_line(skid_start, skid_end, Color(0.9, 0.98, 1.0, 0.24 * dodge_fade), 1.0)
 
 	if show_combat_trails and swing_fx_timer > 0.0:
 		var p = 1.0 - clampf(swing_fx_timer / maxf(0.001, swing_fx_duration), 0.0, 1.0)
@@ -1454,6 +1925,30 @@ func _draw() -> void:
 				1.3
 			)
 
+	if style_ring_timer > 0.0:
+		var ring_t = 1.0 - clampf(style_ring_timer / maxf(0.001, style_ring_duration), 0.0, 1.0)
+		var ring_color = style_ring_color
+		var ring_alpha = (1.0 - ring_t) * (0.62 + 0.18 * clampf(stylish_ring_boost, 0.6, 1.8))
+		var ring_radius = style_ring_radius + ring_t * (10.0 + 4.0 * clampf(stylish_ring_boost, 0.6, 1.8))
+		draw_arc(
+			Vector2(0.0, -2.0),
+			ring_radius,
+			0.0,
+			TAU,
+			34,
+			Color(ring_color.r, ring_color.g, ring_color.b, ring_alpha),
+			1.9
+		)
+		draw_arc(
+			Vector2(0.0, -2.0),
+			ring_radius * 0.72,
+			0.0,
+			TAU,
+			30,
+			Color(ring_color.r, ring_color.g, ring_color.b, ring_alpha * 0.58),
+			1.2
+		)
+
 	if wall_slide_active:
 		var side_x = 5.6 * wall_slide_side
 		draw_line(
@@ -1464,10 +1959,46 @@ func _draw() -> void:
 		)
 		draw_circle(Vector2(side_x, 10.2), 1.2, Color(0.55, 0.9, 1.0, 0.7))
 
+	# Keep HUD-like bars fixed to the top of the player without roll rotation.
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if dodge_success_timer > 0.0:
+		var dodge_t = 1.0 - clampf(dodge_success_timer / maxf(0.001, dodge_success_duration), 0.0, 1.0)
+		var dodge_alpha = 1.0 - dodge_t
+		var dodge_center = Vector2(0.0, -11.0)
+		var dodge_radius = 10.0 + dodge_t * 11.0
+		draw_arc(dodge_center, dodge_radius, 0.0, TAU, 26, Color(0.6, 1.0, 1.0, 0.58 * dodge_alpha), 1.7)
+		draw_arc(dodge_center, dodge_radius * 0.66, 0.0, TAU, 22, Color(0.76, 1.0, 1.0, 0.34 * dodge_alpha), 1.1)
+		var dodge_chevron = 4.8 + dodge_t * 2.6
+		var dodge_color = Color(0.82, 1.0, 1.0, 0.7 * dodge_alpha)
+		draw_line(
+			dodge_center + Vector2(-dodge_chevron, -1.2),
+			dodge_center + Vector2(0.0, -6.3),
+			dodge_color,
+			1.5
+		)
+		draw_line(
+			dodge_center + Vector2(0.0, -6.3),
+			dodge_center + Vector2(dodge_chevron, -1.2),
+			dodge_color,
+			1.5
+		)
+	if parry_success_timer > 0.0:
+		var parry_t = 1.0 - clampf(parry_success_timer / maxf(0.001, parry_success_duration), 0.0, 1.0)
+		var parry_alpha = 1.0 - parry_t
+		var parry_center = Vector2(0.0, -13.0)
+		var parry_radius = 8.0 + parry_t * 13.0
+		draw_arc(parry_center, parry_radius * 0.72, 0.0, TAU, 28, Color(1.0, 0.94, 0.62, 0.56 * parry_alpha), 1.6)
+		draw_circle(parry_center, 1.8 + 0.6 * (1.0 - parry_t), Color(1.0, 0.98, 0.78, 0.85 * parry_alpha))
+		for i in range(6):
+			var a = TAU * float(i) / 6.0 + parry_t * 0.34
+			var dir = Vector2.RIGHT.rotated(a)
+			var p0 = parry_center + dir * (2.6 + parry_t * 2.2)
+			var p1 = parry_center + dir * parry_radius
+			draw_line(p0, p1, Color(1.0, 0.92, 0.44, (0.66 - 0.06 * float(i)) * parry_alpha), 1.35)
 	var hp_ratio = 0.0
 	if max_hp > 0:
 		hp_ratio = clampf(float(hp) / float(max_hp), 0.0, 1.0)
-	var hp_bg_rect = Rect2(Vector2(-14.0, -29.0), Vector2(28.0, 3.0))
+	var hp_bg_rect = Rect2(Vector2(-16.0, -36.0), Vector2(32.0, 3.0))
 	draw_rect(hp_bg_rect, Color(0.05, 0.05, 0.06, 0.88))
 	draw_rect(
 		Rect2(hp_bg_rect.position, Vector2(hp_bg_rect.size.x * hp_ratio, hp_bg_rect.size.y)),
@@ -1475,8 +2006,6 @@ func _draw() -> void:
 	)
 	if hp_ratio <= 0.3:
 		draw_rect(hp_bg_rect.grow(0.9), Color(1.0, 0.2, 0.2, 0.45), false, 1.2)
-
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 func _build_arc_points(center: Vector2, radius: float, start_angle: float, sweep: float, segments: int) -> PackedVector2Array:
 	var points: PackedVector2Array = PackedVector2Array()
